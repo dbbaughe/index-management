@@ -1,9 +1,9 @@
-name: Test and Build Workflow
-# This workflow is triggered on pull requests to master or a opendistro release branch
+name: unique name
 on:
   issue_comment:
     branches:
-      - *
+      - master
+      - opendistro-*
 
 jobs:
   stuff:
