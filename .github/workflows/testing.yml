@@ -17,5 +17,5 @@ jobs:
     steps:
       # This step uses the checkout Github action: https://github.com/actions/checkout
       - name: dbbaughe-testing
-        uses: dbbaughe/action@v1
+        uses: dbbaughe/action@master
 
