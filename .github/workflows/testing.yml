@@ -16,5 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # This step uses the checkout Github action: https://github.com/actions/checkout
-      - name: This is a test
-        uses: actions/dbbaughe-testing@v1
+      - name: dbbaughe-testing
+        uses: dbbaughe/action@v1
+
