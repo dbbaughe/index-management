@@ -13,16 +13,18 @@
  * permissions and limitations under the License.
  */
 
+import org.elasticsearch.gradle.testclusters.TestClustersRegistry
+import org.elasticsearch.gradle.testclusters.TestClustersPlugin
+
 buildscript {
     ext {
-        es_version = System.getProperty("es.version", "7.4.2")
+        es_version = System.getProperty("es.version", "7.5.2")
         kotlin_version = System.getProperty("kotlin.version", "1.3.31")
     }
 
     repositories {
         mavenCentral()
         maven { url "https://plugins.gradle.org/m2/" }
-        // TODO: remove mavenLocal once notification is published to maven
         mavenLocal()
     }
 
@@ -36,18 +38,20 @@ buildscript {
 }
 
 plugins {
-    id 'nebula.ospackage' version "5.3.0"
+    id 'nebula.ospackage' version "8.2.0"
 }
 
 apply plugin: 'java'
 apply plugin: 'jacoco'
 apply plugin: 'idea'
 apply plugin: 'elasticsearch.esplugin'
+apply plugin: 'elasticsearch.testclusters'
 apply plugin: 'io.gitlab.arturbosch.detekt'
 apply plugin: 'org.jetbrains.kotlin.jvm'
 apply plugin: 'org.jetbrains.kotlin.plugin.allopen'
+
 if (!System.properties.containsKey('tests.rest.cluster') && !System.properties.containsKey('tests.cluster')) {
-    apply from: 'build-tools/esplugin-coverage.gradle'
+//    apply from: 'build-tools/esplugin-coverage.gradle'
 }
 check.dependsOn jacocoTestReport
 
@@ -73,12 +77,12 @@ detekt {
 
 dependencies {
     compileOnly "org.elasticsearch:elasticsearch:${es_version}"
-    compileOnly "com.amazon.opendistroforelasticsearch:opendistro-job-scheduler-spi:1.4.0.0"
+    compileOnly "com.amazon.opendistroforelasticsearch:opendistro-job-scheduler-spi:1.5.0.0"
     compile "org.jetbrains.kotlin:kotlin-stdlib:${kotlin_version}"
     compile "org.jetbrains.kotlin:kotlin-stdlib-common:${kotlin_version}"
     compile 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.2.1'
     compile "org.jetbrains:annotations:13.0"
-    compile "com.amazon.opendistroforelasticsearch:notification:1.4.0.0"
+    compile "com.amazon.opendistroforelasticsearch:notification:1.5.0.0"
 
     testCompile "org.elasticsearch.test:framework:${es_version}"
     testCompile "org.jetbrains.kotlin:kotlin-test:${kotlin_version}"
@@ -125,12 +129,12 @@ test {
     systemProperty 'tests.security.manager', 'false'
 }
 
-integTestRunner {
+integTest.runner {
     systemProperty 'tests.security.manager', 'false'
     systemProperty 'java.io.tmpdir', es_tmp_dir.absolutePath
     // Tell the test JVM if the cluster JVM is running under a debugger so that tests can use longer timeouts for
     // requests. The 'doFirst' delays reading the debug setting on the cluster till execution time.
-    doFirst { systemProperty 'cluster.debug', integTestCluster.debug }
+    doFirst { systemProperty 'cluster.debug', getDebug() }
 
     // The --debug-jvm command-line option makes the cluster debuggable; this makes the tests debuggable
     if (System.getProperty("test.debug") != null) {
@@ -138,38 +142,12 @@ integTestRunner {
     }
 }
 
-integTestCluster {
-    distribution = "oss-zip"
+testClusters.integTest {
+    testDistribution = "OSS"
     // Temporary until job-scheduler is published to Maven
-    setupCommand('installPlugin', 'bin/elasticsearch-plugin', 'install',
-            "file://${fileTree("src/test/resources/job-scheduler").getSingleFile().absolutePath}")
+    plugin(fileTree("src/test/resources/job-scheduler").getSingleFile())
 }
 
-
-run {
-    distribution = "oss-zip"
-    // Temporary until job-scheduler is published to Maven
-    setupCommand('installPlugin', 'bin/elasticsearch-plugin', 'install',
-            "file://${fileTree("src/test/resources/job-scheduler").getSingleFile().absolutePath}")
-}
-
-afterEvaluate {
-    project.tasks.getByName("run#installOpendistroIndexManagementPlugin").dependsOn("run#installPlugin")
-    project.tasks.getByName("run#installPlugin").dependsOn.remove(project.tasks.getByName("run#installOpendistroIndexManagementPlugin"))
-    project.tasks.getByName("run#installPlugin").dependsOn("run#copyPlugins")
-    project.tasks.getByName("run#start").dependsOn.remove(project.tasks.getByName("run#installPlugin"))
-    project.tasks.getByName("run#start").dependsOn("run#installOpendistroIndexManagementPlugin")
-}
-
-tasks.whenTaskAdded { task ->
-    if (task.name == "integTestCluster#wait") {
-        project.tasks.getByName("integTestCluster#installOpendistroIndexManagementPlugin").dependsOn("integTestCluster#installPlugin")
-        project.tasks.getByName("integTestCluster#installPlugin").dependsOn.remove(project.tasks.getByName("integTestCluster#installOpendistroIndexManagementPlugin"))
-        project.tasks.getByName("integTestCluster#installPlugin").dependsOn("integTestCluster#copyPlugins")
-        project.tasks.getByName("integTestCluster#start").dependsOn.remove(project.tasks.getByName("integTestCluster#installPlugin"))
-        project.tasks.getByName("integTestCluster#start").dependsOn("integTestCluster#installOpendistroIndexManagementPlugin")
-    }
-}
 
 task ktlint(type: JavaExec, group: "verification") {
     description = "Check Kotlin code style."
@@ -190,3 +168,10 @@ task ktlintFormat(type: JavaExec, group: "formatting") {
 }
 
 apply from: 'build-tools/pkgbuild.gradle'
+
+configure(rootProject) {
+    TestClustersRegistry registry = rootProject.extensions.create("testClustersRegistry", TestClustersRegistry)
+    TestClustersPlugin.configureClaimClustersHook(project.gradle, registry)
+    TestClustersPlugin.configureStartClustersHook(project.gradle, registry)
+    TestClustersPlugin.configureStopClustersHook(project.gradle, registry)
+}
