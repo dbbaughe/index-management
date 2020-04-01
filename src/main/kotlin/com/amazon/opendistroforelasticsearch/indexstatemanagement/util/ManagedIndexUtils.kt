@@ -193,7 +193,9 @@ fun Transition.evaluateConditions(
     }
 
     if (this.conditions.indexAge != null) {
-        val elapsedTime = Instant.now().toEpochMilli() - indexCreationDate.toEpochMilli()
+        val indexCreationDateMilli = indexCreationDate.toEpochMilli()
+        if (indexCreationDateMilli == -1L) return false
+        val elapsedTime = Instant.now().toEpochMilli() - indexCreationDateMilli
         return this.conditions.indexAge.millis <= elapsedTime
     }
 
@@ -230,7 +232,9 @@ fun RolloverActionConfig.evaluateConditions(
     }
 
     if (this.minAge != null) {
-        val elapsedTime = Instant.now().toEpochMilli() - indexCreationDate.toEpochMilli()
+        val indexCreationDateMilli = indexCreationDate.toEpochMilli()
+        if (indexCreationDateMilli == -1L) return false
+        val elapsedTime = Instant.now().toEpochMilli() - indexCreationDateMilli
         if (this.minAge.millis <= elapsedTime) return true
     }
 

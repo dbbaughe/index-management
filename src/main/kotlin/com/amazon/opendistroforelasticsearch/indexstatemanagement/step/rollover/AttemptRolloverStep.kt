@@ -65,10 +65,15 @@ class AttemptRolloverStep(
         statsResponse ?: return
 
         val indexCreationDate = Instant.ofEpochMilli(clusterService.state().metaData().index(managedIndexMetaData.index).creationDate)
+        if (indexCreationDate.toEpochMilli() == -1L) {
+            logger.warn("${managedIndexMetaData.index} had an indexCreationDate=-1L, cannot use for comparison")
+        }
         val numDocs = statsResponse.primaries.docs?.count ?: 0
         val indexSize = ByteSizeValue(statsResponse.primaries.docs?.totalSizeInBytes ?: 0)
 
         if (config.evaluateConditions(indexCreationDate, numDocs, indexSize)) {
+            logger.info("Rollover conditions evaluated to true [indexCreationDate=${indexCreationDate.toEpochMilli()}," +
+                    " numDocs=$numDocs, indexSize=${indexSize.bytes}]")
             executeRollover(alias)
         } else {
             stepStatus = StepStatus.CONDITION_NOT_MET

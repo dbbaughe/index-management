@@ -89,13 +89,21 @@ class AttemptTransitionStep(
             }
 
             // Find the first transition that evaluates to true and get the state to transition to, otherwise return null if none are true
-            stateName = config.transitions.find { it.evaluateConditions(getIndexCreationDate(), numDocs, indexSize, getStepStartTime()) }?.stateName
-            val message = if (stateName == null) {
-                stepStatus = StepStatus.CONDITION_NOT_MET
-                "Attempting to transition"
-            } else {
+            val indexCreationDate = getIndexCreationDate()
+            val stepStartTime = getStepStartTime()
+            if (indexCreationDate.toEpochMilli() == -1L) {
+                logger.warn("${managedIndexMetaData.index} had an indexCreationDate=-1L, cannot use for comparison")
+            }
+            stateName = config.transitions.find { it.evaluateConditions(indexCreationDate, numDocs, indexSize, stepStartTime) }?.stateName
+            val message: String
+            if (stateName != null) {
+                logger.info("Transition conditions evaluated to true [indexCreationDate=${indexCreationDate.toEpochMilli()}," +
+                        " numDocs=$numDocs, indexSize=${indexSize?.bytes}, stepStartTime=${stepStartTime.toEpochMilli()}]")
                 stepStatus = StepStatus.COMPLETED
-                "Transitioning to $stateName"
+                message = "Transitioning to $stateName"
+            } else {
+                stepStatus = StepStatus.CONDITION_NOT_MET
+                message = "Attempting to transition"
             }
             info = mapOf("message" to message)
         } catch (e: Exception) {
