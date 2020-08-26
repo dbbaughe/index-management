@@ -31,6 +31,8 @@ import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagemen
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.resthandler.RestRemovePolicyAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.resthandler.RestRetryFailedManagedIndexAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.settings.ManagedIndexSettings
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.Rollup
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.resthandler.RestIndexRollupAction
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.JobSchedulerExtension
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.ScheduledJobParser
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.ScheduledJobRunner
@@ -72,7 +74,9 @@ internal class IndexManagementPlugin : JobSchedulerExtension, ActionPlugin, Plug
         const val PLUGIN_NAME = "opendistro-im"
         const val OPEN_DISTRO_BASE_URI = "/_opendistro"
         const val ISM_BASE_URI = "$OPEN_DISTRO_BASE_URI/_ism"
+        const val ROLLUP_BASE_URI = "$OPEN_DISTRO_BASE_URI/_rollup"
         const val POLICY_BASE_URI = "$ISM_BASE_URI/policies"
+        const val ROLLUP_JOBS_BASE_URI = "$ROLLUP_BASE_URI/jobs"
         const val INDEX_MANAGEMENT_INDEX = ".opendistro-ism-config"
         const val INDEX_MANAGEMENT_JOB_TYPE = "opendistro-index-management"
         const val INDEX_STATE_MANAGEMENT_HISTORY_TYPE = "managed_index_meta_data"
@@ -82,7 +86,7 @@ internal class IndexManagementPlugin : JobSchedulerExtension, ActionPlugin, Plug
 
     override fun getJobType(): String = INDEX_MANAGEMENT_JOB_TYPE
 
-    override fun getJobRunner(): ScheduledJobRunner = ManagedIndexRunner
+    override fun getJobRunner(): ScheduledJobRunner = IndexManagementRunner
 
     override fun getJobParser(): ScheduledJobParser {
         return ScheduledJobParser { xcp, id, jobDocVersion ->
@@ -97,6 +101,9 @@ internal class IndexManagementPlugin : JobSchedulerExtension, ActionPlugin, Plug
                     }
                     Policy.POLICY_TYPE -> {
                         return@ScheduledJobParser null
+                    }
+                    Rollup.ROLLUP_TYPE -> {
+                        return@ScheduledJobParser Rollup.parse(xcp, id, jobDocVersion.seqNo, jobDocVersion.primaryTerm)
                     }
                     else -> {
                         logger.info("Unsupported document was indexed in $INDEX_MANAGEMENT_INDEX with type: $fieldName")
@@ -124,7 +131,8 @@ internal class IndexManagementPlugin : JobSchedulerExtension, ActionPlugin, Plug
             RestRetryFailedManagedIndexAction(),
             RestAddPolicyAction(),
             RestRemovePolicyAction(),
-            RestChangePolicyAction(clusterService)
+            RestChangePolicyAction(clusterService),
+            RestIndexRollupAction(settings, clusterService, indexManagementIndices)
         )
     }
 

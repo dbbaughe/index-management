@@ -13,7 +13,7 @@
  * permissions and limitations under the License.
  */
 
-package com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.resthandler
+package com.amazon.opendistroforelasticsearch.indexmanagement.resthandler
 
 import org.elasticsearch.client.node.NodeClient
 import org.elasticsearch.rest.BytesRestResponse

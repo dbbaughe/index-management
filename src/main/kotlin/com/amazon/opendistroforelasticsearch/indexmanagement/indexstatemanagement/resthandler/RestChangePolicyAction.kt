@@ -30,6 +30,7 @@ import com.amazon.opendistroforelasticsearch.indexmanagement.util.IndexUtils
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.util.UPDATED_INDICES
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.util.isSafeToChange
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.util.updateManagedIndexRequest
+import com.amazon.opendistroforelasticsearch.indexmanagement.resthandler.AsyncActionHandler
 import org.apache.logging.log4j.LogManager
 import org.elasticsearch.action.ActionListener
 import org.elasticsearch.action.admin.cluster.state.ClusterStateRequest

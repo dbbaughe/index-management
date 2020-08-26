@@ -1,6 +1,6 @@
 {
   "_meta" : {
-    "schema_version": 4
+    "schema_version": 5
   },
   "dynamic": "strict",
   "properties": {
@@ -397,6 +397,61 @@
               "type": "boolean"
             }
           }
+        },
+        "schedule": {
+          "properties": {
+            "interval": {
+              "properties": {
+                "period": {
+                  "type": "integer"
+                },
+                "unit": {
+                  "type": "keyword"
+                },
+                "start_time": {
+                  "type": "date",
+                  "format": "strict_date_time||epoch_millis"
+                }
+              }
+            },
+            "cron": {
+              "properties": {
+                "expression": {
+                  "type": "keyword"
+                },
+                "timezone": {
+                  "type": "keyword"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "rollup": {
+      "properties": {
+        "name": {
+          "type": "text",
+          "fields": {
+            "keyword": {
+              "type": "keyword",
+              "ignore_above": 256
+            }
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "enabled_time": {
+          "type": "date",
+          "format": "strict_date_time||epoch_millis"
+        },
+        "last_updated_time": {
+          "type": "date",
+          "format": "strict_date_time||epoch_millis"
+        },
+        "rollup_id": {
+          "type" : "keyword"
         },
         "schedule": {
           "properties": {

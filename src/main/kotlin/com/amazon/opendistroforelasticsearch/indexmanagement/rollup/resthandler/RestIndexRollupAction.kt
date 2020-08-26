@@ -13,14 +13,11 @@
  * permissions and limitations under the License.
  */
 
-package com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.resthandler
+package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.resthandler
 
 import com.amazon.opendistroforelasticsearch.indexmanagement.IndexManagementIndices
 import com.amazon.opendistroforelasticsearch.indexmanagement.IndexManagementPlugin.Companion.INDEX_MANAGEMENT_INDEX
-import com.amazon.opendistroforelasticsearch.indexmanagement.IndexManagementPlugin.Companion.POLICY_BASE_URI
-import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.model.Policy
-import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.model.Policy.Companion.POLICY_TYPE
-import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.settings.ManagedIndexSettings.Companion.ALLOW_LIST
+import com.amazon.opendistroforelasticsearch.indexmanagement.IndexManagementPlugin.Companion.ROLLUP_JOBS_BASE_URI
 import com.amazon.opendistroforelasticsearch.indexmanagement.util.IF_PRIMARY_TERM
 import com.amazon.opendistroforelasticsearch.indexmanagement.util.IF_SEQ_NO
 import com.amazon.opendistroforelasticsearch.indexmanagement.util.IndexUtils
@@ -29,8 +26,9 @@ import com.amazon.opendistroforelasticsearch.indexmanagement.util._ID
 import com.amazon.opendistroforelasticsearch.indexmanagement.util._PRIMARY_TERM
 import com.amazon.opendistroforelasticsearch.indexmanagement.util._SEQ_NO
 import com.amazon.opendistroforelasticsearch.indexmanagement.util._VERSION
-import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.util.getDisallowedActions
 import com.amazon.opendistroforelasticsearch.indexmanagement.resthandler.AsyncActionHandler
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.Rollup
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.Rollup.Companion.ROLLUP_TYPE
 import org.apache.logging.log4j.LogManager
 import org.elasticsearch.action.ActionListener
 import org.elasticsearch.action.DocWriteRequest
@@ -56,40 +54,35 @@ import org.elasticsearch.rest.action.RestResponseListener
 import java.io.IOException
 import java.time.Instant
 
-class RestIndexPolicyAction(
+class RestIndexRollupAction(
     settings: Settings,
     val clusterService: ClusterService,
     indexManagementIndices: IndexManagementIndices
 ) : BaseRestHandler() {
 
     private val log = LogManager.getLogger(javaClass)
-    private var ismIndices = indexManagementIndices
-    @Volatile private var allowList = ALLOW_LIST.get(settings)
-
-    init {
-        clusterService.clusterSettings.addSettingsUpdateConsumer(ALLOW_LIST) { allowList = it }
-    }
+    private var imIndices = indexManagementIndices
 
     override fun routes(): List<Route> {
         return listOf(
-            Route(PUT, POLICY_BASE_URI),
-            Route(PUT, "$POLICY_BASE_URI/{policyID}")
+            Route(PUT, ROLLUP_JOBS_BASE_URI),
+            Route(PUT, "$ROLLUP_JOBS_BASE_URI/{rollupID}")
         )
     }
 
     override fun getName(): String {
-        return "index_policy_action"
+        return "index_rollup_action"
     }
 
     @Throws(IOException::class)
     override fun prepareRequest(request: RestRequest, client: NodeClient): RestChannelConsumer {
-        val id = request.param("policyID", Policy.NO_ID)
-        if (Policy.NO_ID == id) {
-            throw IllegalArgumentException("Missing policy ID")
+        val id = request.param("rollupID", Rollup.NO_ID)
+        if (Rollup.NO_ID == id) {
+            throw IllegalArgumentException("Missing rollup ID")
         }
 
         val xcp = request.contentParser()
-        val policy = Policy.parseWithType(xcp = xcp, id = id).copy(lastUpdatedTime = Instant.now())
+        val rollup = Rollup.parseWithType(xcp = xcp, id = id).copy(jobLastUpdatedTime = Instant.now())
         val seqNo = request.paramAsLong(IF_SEQ_NO, SequenceNumbers.UNASSIGNED_SEQ_NO)
         val primaryTerm = request.paramAsLong(IF_PRIMARY_TERM, SequenceNumbers.UNASSIGNED_PRIMARY_TERM)
         val refreshPolicy = if (request.hasParam(REFRESH)) {
@@ -97,40 +90,29 @@ class RestIndexPolicyAction(
         } else {
             WriteRequest.RefreshPolicy.IMMEDIATE
         }
-        val disallowedActions = policy.getDisallowedActions(allowList)
-        if (disallowedActions.isNotEmpty()) {
-            return RestChannelConsumer { channel ->
-                channel.sendResponse(
-                    BytesRestResponse(
-                        RestStatus.FORBIDDEN,
-                        "You have actions that are not allowed in your policy $disallowedActions"
-                    )
-                )
-            }
-        }
         return RestChannelConsumer { channel ->
-            IndexPolicyHandler(client, channel, id, seqNo, primaryTerm, refreshPolicy, policy).start()
+            IndexRollupHandler(client, channel, id, seqNo, primaryTerm, refreshPolicy, rollup).start()
         }
     }
 
-    inner class IndexPolicyHandler(
+    inner class IndexRollupHandler(
         client: NodeClient,
         channel: RestChannel,
-        private val policyId: String,
+        private val rollupId: String,
         private val seqNo: Long,
         private val primaryTerm: Long,
         private val refreshPolicy: WriteRequest.RefreshPolicy,
-        private var newPolicy: Policy
+        private var newRollup: Rollup
     ) : AsyncActionHandler(client, channel) {
 
         fun start() {
-            ismIndices.checkAndUpdateISMConfigIndex(ActionListener.wrap(::onCreateMappingsResponse, ::onFailure))
+            imIndices.checkAndUpdateISMConfigIndex(ActionListener.wrap(::onCreateMappingsResponse, ::onFailure))
         }
 
         private fun onCreateMappingsResponse(response: AcknowledgedResponse) {
             if (response.isAcknowledged) {
                 log.info("Successfully created or updated $INDEX_MANAGEMENT_INDEX with newest mappings.")
-                putPolicy()
+                putRollup()
             } else {
                 log.error("Unable to create or update $INDEX_MANAGEMENT_INDEX with newest mapping.")
                 channel.sendResponse(
@@ -141,13 +123,13 @@ class RestIndexPolicyAction(
             }
         }
 
-        private fun putPolicy() {
-            newPolicy.copy(schemaVersion = IndexUtils.indexManagementConfigSchemaVersion)
+        private fun putRollup() {
+            newRollup.copy(schemaVersion = IndexUtils.indexManagementConfigSchemaVersion)
 
             val indexRequest = IndexRequest(INDEX_MANAGEMENT_INDEX)
                     .setRefreshPolicy(refreshPolicy)
-                    .source(newPolicy.toXContent(channel.newBuilder()))
-                    .id(policyId)
+                    .source(newRollup.toXContent(channel.newBuilder(), ToXContent.EMPTY_PARAMS))
+                    .id(rollupId)
                     .timeout(IndexRequest.DEFAULT_TIMEOUT)
             if (seqNo == SequenceNumbers.UNASSIGNED_SEQ_NO || primaryTerm == SequenceNumbers.UNASSIGNED_PRIMARY_TERM) {
                 indexRequest.opType(DocWriteRequest.OpType.CREATE)
@@ -155,10 +137,10 @@ class RestIndexPolicyAction(
                 indexRequest.setIfSeqNo(seqNo)
                         .setIfPrimaryTerm(primaryTerm)
             }
-            client.index(indexRequest, indexPolicyResponse())
+            client.index(indexRequest, indexRollupResponse())
         }
 
-        private fun indexPolicyResponse(): RestResponseListener<IndexResponse> {
+        private fun indexRollupResponse(): RestResponseListener<IndexResponse> {
             return object : RestResponseListener<IndexResponse>(channel) {
                 @Throws(Exception::class)
                 override fun buildResponse(response: IndexResponse): RestResponse {
@@ -173,12 +155,12 @@ class RestIndexPolicyAction(
                             .field(_VERSION, response.version)
                             .field(_PRIMARY_TERM, response.primaryTerm)
                             .field(_SEQ_NO, response.seqNo)
-                            .field(POLICY_TYPE, newPolicy)
+                            .field(ROLLUP_TYPE, newRollup)
                             .endObject()
 
                     val restResponse = BytesRestResponse(response.status(), builder)
                     if (response.status() == RestStatus.CREATED) {
-                        val location = "$POLICY_BASE_URI/${response.id}"
+                        val location = "$ROLLUP_JOBS_BASE_URI/${response.id}"
                         restResponse.addHeader("Location", location)
                     }
                     return restResponse
