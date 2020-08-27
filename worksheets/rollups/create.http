@@ -1,0 +1,29 @@
+PUT localhost:9200/_opendistro/_rollup/jobs/example
+Content-Type: application/json
+
+{
+  "rollup": {
+    "schedule": {
+      "interval": {
+        "period": 1,
+        "unit": "Minutes",
+        "start_time": {{$timestamp}}
+      }
+    },
+    "last_updated_time": {{$timestamp}},
+    "description": "An example rollup",
+    "source_index": "test-index",
+    "target_index": "rollup-test-index",
+    "page_size": 100,
+    "delay": 0,
+    "dimensions": {
+      "terms": {
+          "fields": ["example_field"]
+      },
+      "date_histogram": {
+          "field": "@timestamp",
+          "fixed_interval": "1h"
+      }
+    }
+  }
+}

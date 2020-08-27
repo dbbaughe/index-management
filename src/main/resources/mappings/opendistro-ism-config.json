@@ -430,15 +430,6 @@
     },
     "rollup": {
       "properties": {
-        "name": {
-          "type": "text",
-          "fields": {
-            "keyword": {
-              "type": "keyword",
-              "ignore_above": 256
-            }
-          }
-        },
         "enabled": {
           "type": "boolean"
         },
@@ -449,9 +440,6 @@
         "last_updated_time": {
           "type": "date",
           "format": "strict_date_time||epoch_millis"
-        },
-        "rollup_id": {
-          "type" : "keyword"
         },
         "schedule": {
           "properties": {
@@ -475,6 +463,69 @@
                   "type": "keyword"
                 },
                 "timezone": {
+                  "type": "keyword"
+                }
+              }
+            }
+          }
+        },
+        "description": {
+          "type": "text"
+        },
+        "source_index": {
+          "type": "text",
+          "fields": {
+            "keyword": {
+              "type": "keyword",
+              "ignore_above": 256
+            }
+          }
+        },
+        "target_index": {
+          "type": "text",
+          "fields": {
+            "keyword": {
+              "type": "keyword",
+              "ignore_above": 256
+            }
+          }
+        },
+        "page_size": {
+          "type": "long"
+        },
+        "delay": {
+          "type": "long"
+        },
+        "roles": {
+          "type": "text",
+          "fields": {
+            "keyword": {
+              "type": "keyword",
+              "ignore_above": 256
+            }
+          }
+        },
+        "dimensions": {
+          "properties": {
+            "date_histogram": {
+              "properties": {
+                "field": {
+                  "type": "keyword"
+                },
+                "fixed_interval": {
+                  "type": "keyword"
+                },
+                "calendar_interval": {
+                  "type": "keyword"
+                },
+                "timezone": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "terms": {
+              "properties": {
+                "fields": {
                   "type": "keyword"
                 }
               }

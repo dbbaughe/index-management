@@ -40,6 +40,15 @@ data class Rollup(
     val jobLastUpdatedTime: Instant,
     val jobEnabledTime: Instant?,
     val description: String,
+    val sourceIndex: String,
+    val targetIndex: String,
+    val roles: List<String>,
+    val pageSize: Long,
+    val delay: Long,
+    val terms: RollupTerms?,
+    val dateHistogram: RollupDateHistogram,
+    val histograms: List<RollupHistogram>,
+    val metrics: List<RollupMetrics>
 ) : ScheduledJobParameter {
 
     init {
@@ -70,7 +79,18 @@ data class Rollup(
                     .field(SCHEDULE_FIELD, jobSchedule)
                     .optionalTimeField(LAST_UPDATED_TIME_FIELD, jobLastUpdatedTime)
                     .optionalTimeField(ENABLED_TIME_FIELD, jobEnabledTime)
-                    .optionalTimeField(DESCRIPTION_FIELD, description)
+                    .field(DESCRIPTION_FIELD, description)
+                    .field(SOURCE_INDEX_FIELD, sourceIndex)
+                    .field(TARGET_INDEX_FIELD, targetIndex)
+                    .field(ROLES_FIELD, roles.toTypedArray())
+                    .field(PAGE_SIZE_FIELD, pageSize)
+                    .field(DELAY_FIELD, delay)
+                    .startObject(DIMENSIONS_FIELD)
+                        .field(RollupTerms.TERMS_FIELD, terms)
+                        .field(RollupDateHistogram.DATE_HISTOGRAM_FIELD, dateHistogram)
+                        .field(RollupHistogram.HISTOGRAM_FIELD, histograms.toTypedArray())
+                    .endObject()
+                    .field(RollupMetrics.METRICS_FIELD, metrics.toTypedArray())
                 .endObject()
             .endObject()
         return builder
@@ -79,13 +99,19 @@ data class Rollup(
     companion object {
         const val ROLLUP_TYPE = "rollup"
         const val NO_ID = ""
-        const val NAME_FIELD = "name"
         const val ENABLED_FIELD = "enabled"
         const val SCHEMA_VERSION_FIELD = "schema_version"
         const val SCHEDULE_FIELD = "schedule"
         const val LAST_UPDATED_TIME_FIELD = "last_updated_time"
         const val ENABLED_TIME_FIELD = "enabled_time"
         const val DESCRIPTION_FIELD = "description"
+        const val SOURCE_INDEX_FIELD = "source_index"
+        const val TARGET_INDEX_FIELD = "target_index"
+        const val ROLES_FIELD = "roles"
+        const val PAGE_SIZE_FIELD = "page_size"
+        const val DELAY_FIELD = "delay"
+        const val DIMENSIONS_FIELD = "dimensions"
+
 
         @Suppress("ComplexMethod", "LongMethod")
         @JvmStatic
@@ -103,6 +129,16 @@ data class Rollup(
             var enabledTime: Instant? = null
             var enabled = true
             var description: String? = null
+            var sourceIndex: String? = null
+            var targetIndex: String? = null
+            val roles = mutableListOf<String>()
+            var pageSize: Long? = null
+            var delay: Long? = null
+            var dateHistogram: RollupDateHistogram? = null
+            var terms: RollupTerms? = null
+            val histograms = mutableListOf<RollupHistogram>()
+            val metrics = mutableListOf<RollupMetrics>()
+            //var metrics
 
             ensureExpectedToken(Token.START_OBJECT, xcp.currentToken(), xcp::getTokenLocation)
             while (xcp.nextToken() != Token.END_OBJECT) {
@@ -116,6 +152,41 @@ data class Rollup(
                     ENABLED_TIME_FIELD -> enabledTime = xcp.instant()
                     LAST_UPDATED_TIME_FIELD -> lastUpdatedTime = xcp.instant()
                     DESCRIPTION_FIELD -> description = xcp.text()
+                    SOURCE_INDEX_FIELD -> sourceIndex = xcp.text()
+                    TARGET_INDEX_FIELD -> targetIndex = xcp.text()
+                    ROLES_FIELD -> {
+                        ensureExpectedToken(Token.START_ARRAY, xcp.currentToken(), xcp::getTokenLocation)
+                        while (xcp.nextToken() != Token.END_ARRAY) {
+                            roles.add(xcp.text())
+                        }
+                    }
+                    PAGE_SIZE_FIELD -> pageSize = xcp.longValue()
+                    DELAY_FIELD -> delay = xcp.longValue()
+                    DIMENSIONS_FIELD -> {
+                        ensureExpectedToken(Token.START_OBJECT, xcp.currentToken(), xcp::getTokenLocation)
+                        while (xcp.nextToken() != Token.END_OBJECT) {
+                            val dimensionsFieldName = xcp.currentName()
+                            xcp.nextToken()
+
+                            when (dimensionsFieldName) {
+                                RollupTerms.TERMS_FIELD -> terms = RollupTerms.parse(xcp)
+                                RollupDateHistogram.DATE_HISTOGRAM_FIELD -> dateHistogram = RollupDateHistogram.parse(xcp)
+                                RollupHistogram.HISTOGRAM_FIELD -> {
+                                    ensureExpectedToken(Token.START_ARRAY, xcp.currentToken(), xcp::getTokenLocation)
+                                    while (xcp.nextToken() != Token.END_ARRAY) {
+                                        histograms.add(RollupHistogram.parse(xcp))
+                                    }
+                                }
+                                RollupMetrics.METRICS_FIELD -> {
+                                    ensureExpectedToken(Token.START_ARRAY, xcp.currentToken(), xcp::getTokenLocation)
+                                    while (xcp.nextToken() != Token.END_ARRAY) {
+                                        metrics.add(RollupMetrics.parse(xcp))
+                                    }
+                                }
+                                else -> throw IllegalArgumentException("Invalid field: [$dimensionsFieldName] found in Rollup dimensions.")
+                            }
+                        }
+                    }
                     else -> throw IllegalArgumentException("Invalid field: [$fieldName] found in Rollup.")
                 }
             }
@@ -134,7 +205,16 @@ data class Rollup(
                 jobSchedule = requireNotNull(schedule) { "Rollup schedule is null" },
                 jobLastUpdatedTime = requireNotNull(lastUpdatedTime) { "Rollup last updated time is null" },
                 jobEnabledTime = enabledTime,
-                description = requireNotNull(description) { "Rollup description is null" }
+                description = requireNotNull(description) { "Rollup description is null" },
+                sourceIndex = requireNotNull(sourceIndex) { "Rollup source index is null" },
+                targetIndex = requireNotNull(targetIndex) { "Rollup target index is null" },
+                roles = roles.toList(),
+                pageSize = requireNotNull(pageSize) { "Rollup page size is null" },
+                delay = requireNotNull(delay) { "Rollup delay is null" },
+                terms = terms,
+                dateHistogram = requireNotNull(dateHistogram) { "Rollup date histogram is required" },
+                histograms = histograms,
+                metrics = metrics
             )
         }
 

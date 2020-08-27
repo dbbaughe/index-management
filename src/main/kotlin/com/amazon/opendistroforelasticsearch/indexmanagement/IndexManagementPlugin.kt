@@ -56,6 +56,7 @@ import org.elasticsearch.env.Environment
 import org.elasticsearch.env.NodeEnvironment
 import org.elasticsearch.plugins.ActionPlugin
 import org.elasticsearch.plugins.Plugin
+import org.elasticsearch.plugins.SearchPlugin
 import org.elasticsearch.repositories.RepositoriesService
 import org.elasticsearch.rest.RestController
 import org.elasticsearch.rest.RestHandler
@@ -64,7 +65,7 @@ import org.elasticsearch.threadpool.ThreadPool
 import org.elasticsearch.watcher.ResourceWatcherService
 import java.util.function.Supplier
 
-internal class IndexManagementPlugin : JobSchedulerExtension, ActionPlugin, Plugin() {
+internal class IndexManagementPlugin : JobSchedulerExtension, SearchPlugin, ActionPlugin, Plugin() {
 
     private val logger = LogManager.getLogger(javaClass)
     lateinit var indexManagementIndices: IndexManagementIndices
