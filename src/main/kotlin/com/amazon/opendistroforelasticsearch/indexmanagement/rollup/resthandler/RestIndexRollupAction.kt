@@ -15,30 +15,16 @@
 
 package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.resthandler
 
-import com.amazon.opendistroforelasticsearch.indexmanagement.IndexManagementIndices
-import com.amazon.opendistroforelasticsearch.indexmanagement.IndexManagementPlugin.Companion.INDEX_MANAGEMENT_INDEX
 import com.amazon.opendistroforelasticsearch.indexmanagement.IndexManagementPlugin.Companion.ROLLUP_JOBS_BASE_URI
 import com.amazon.opendistroforelasticsearch.indexmanagement.util.IF_PRIMARY_TERM
 import com.amazon.opendistroforelasticsearch.indexmanagement.util.IF_SEQ_NO
-import com.amazon.opendistroforelasticsearch.indexmanagement.util.IndexUtils
 import com.amazon.opendistroforelasticsearch.indexmanagement.util.REFRESH
-import com.amazon.opendistroforelasticsearch.indexmanagement.util._ID
-import com.amazon.opendistroforelasticsearch.indexmanagement.util._PRIMARY_TERM
-import com.amazon.opendistroforelasticsearch.indexmanagement.util._SEQ_NO
-import com.amazon.opendistroforelasticsearch.indexmanagement.util._VERSION
-import com.amazon.opendistroforelasticsearch.indexmanagement.resthandler.AsyncActionHandler
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.index.IndexRollupAction
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.index.IndexRollupRequest
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.index.IndexRollupResponse
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.Rollup
-import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.Rollup.Companion.ROLLUP_TYPE
-import org.apache.logging.log4j.LogManager
-import org.elasticsearch.action.ActionListener
-import org.elasticsearch.action.DocWriteRequest
-import org.elasticsearch.action.index.IndexRequest
-import org.elasticsearch.action.index.IndexResponse
 import org.elasticsearch.action.support.WriteRequest
-import org.elasticsearch.action.support.master.AcknowledgedResponse
 import org.elasticsearch.client.node.NodeClient
-import org.elasticsearch.cluster.service.ClusterService
-import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.common.xcontent.ToXContent
 import org.elasticsearch.index.seqno.SequenceNumbers
 import org.elasticsearch.rest.BaseRestHandler
@@ -54,14 +40,7 @@ import org.elasticsearch.rest.action.RestResponseListener
 import java.io.IOException
 import java.time.Instant
 
-class RestIndexRollupAction(
-    settings: Settings,
-    val clusterService: ClusterService,
-    indexManagementIndices: IndexManagementIndices
-) : BaseRestHandler() {
-
-    private val log = LogManager.getLogger(javaClass)
-    private var imIndices = indexManagementIndices
+class RestIndexRollupAction() : BaseRestHandler() {
 
     override fun routes(): List<Route> {
         return listOf(
@@ -90,81 +69,24 @@ class RestIndexRollupAction(
         } else {
             WriteRequest.RefreshPolicy.IMMEDIATE
         }
+        val indexRollupRequest = IndexRollupRequest(id, seqNo, primaryTerm, refreshPolicy, request.method(), rollup)
         return RestChannelConsumer { channel ->
-            IndexRollupHandler(client, channel, id, seqNo, primaryTerm, refreshPolicy, rollup).start()
+            client.execute(IndexRollupAction.INSTANCE, indexRollupRequest, indexRollupResponse(channel))
         }
     }
 
-    inner class IndexRollupHandler(
-        client: NodeClient,
-        channel: RestChannel,
-        private val rollupId: String,
-        private val seqNo: Long,
-        private val primaryTerm: Long,
-        private val refreshPolicy: WriteRequest.RefreshPolicy,
-        private var newRollup: Rollup
-    ) : AsyncActionHandler(client, channel) {
-
-        fun start() {
-            imIndices.checkAndUpdateISMConfigIndex(ActionListener.wrap(::onCreateMappingsResponse, ::onFailure))
-        }
-
-        private fun onCreateMappingsResponse(response: AcknowledgedResponse) {
-            if (response.isAcknowledged) {
-                log.info("Successfully created or updated $INDEX_MANAGEMENT_INDEX with newest mappings.")
-                putRollup()
-            } else {
-                log.error("Unable to create or update $INDEX_MANAGEMENT_INDEX with newest mapping.")
-                channel.sendResponse(
-                        BytesRestResponse(
-                                RestStatus.INTERNAL_SERVER_ERROR,
-                                response.toXContent(channel.newErrorBuilder(), ToXContent.EMPTY_PARAMS))
-                )
-            }
-        }
-
-        private fun putRollup() {
-            newRollup.copy(schemaVersion = IndexUtils.indexManagementConfigSchemaVersion)
-
-            val indexRequest = IndexRequest(INDEX_MANAGEMENT_INDEX)
-                    .setRefreshPolicy(refreshPolicy)
-                    .source(newRollup.toXContent(channel.newBuilder(), ToXContent.EMPTY_PARAMS))
-                    .id(rollupId)
-                    .timeout(IndexRequest.DEFAULT_TIMEOUT)
-            if (seqNo == SequenceNumbers.UNASSIGNED_SEQ_NO || primaryTerm == SequenceNumbers.UNASSIGNED_PRIMARY_TERM) {
-                indexRequest.opType(DocWriteRequest.OpType.CREATE)
-            } else {
-                indexRequest.setIfSeqNo(seqNo)
-                        .setIfPrimaryTerm(primaryTerm)
-            }
-            client.index(indexRequest, indexRollupResponse())
-        }
-
-        private fun indexRollupResponse(): RestResponseListener<IndexResponse> {
-            return object : RestResponseListener<IndexResponse>(channel) {
-                @Throws(Exception::class)
-                override fun buildResponse(response: IndexResponse): RestResponse {
-                    if (response.shardInfo.successful < 1) {
-                        return BytesRestResponse(response.status(), response.toXContent(channel.newErrorBuilder(),
-                                ToXContent.EMPTY_PARAMS))
-                    }
-
-                    val builder = channel.newBuilder()
-                            .startObject()
-                            .field(_ID, response.id)
-                            .field(_VERSION, response.version)
-                            .field(_PRIMARY_TERM, response.primaryTerm)
-                            .field(_SEQ_NO, response.seqNo)
-                            .field(ROLLUP_TYPE, newRollup)
-                            .endObject()
-
-                    val restResponse = BytesRestResponse(response.status(), builder)
-                    if (response.status() == RestStatus.CREATED) {
-                        val location = "$ROLLUP_JOBS_BASE_URI/${response.id}"
-                        restResponse.addHeader("Location", location)
-                    }
-                    return restResponse
+    private fun indexRollupResponse(channel: RestChannel):
+        RestResponseListener<IndexRollupResponse> {
+        return object : RestResponseListener<IndexRollupResponse>(channel) {
+            @Throws(Exception::class)
+            override fun buildResponse(response: IndexRollupResponse): RestResponse {
+                val restResponse =
+                    BytesRestResponse(response.status, response.toXContent(channel.newBuilder(), ToXContent.EMPTY_PARAMS))
+                if (response.status == RestStatus.CREATED) {
+                    val location = "$ROLLUP_JOBS_BASE_URI/${response.id}"
+                    restResponse.addHeader("Location", location)
                 }
+                return restResponse
             }
         }
     }

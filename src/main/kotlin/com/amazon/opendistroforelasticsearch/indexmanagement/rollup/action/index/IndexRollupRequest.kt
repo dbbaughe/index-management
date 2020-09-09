@@ -10,39 +10,21 @@ import org.elasticsearch.common.io.stream.StreamOutput
 import org.elasticsearch.rest.RestRequest
 import java.io.IOException
 
-
-/**
- * A request to delete a rollup job.
- */
 class IndexRollupRequest : IndexRequest {
     val rollupID: String
-    val seqNo: Long
-    val primaryTerm: Long
-    val rPolicy: WriteRequest.RefreshPolicy
     val method: RestRequest.Method
-//    val rollup: Rollup
-    //    val destinationId: String
-    //    val seqNo: Long
-    //    val primaryTerm: Long
-    //    val refreshPolicy: WriteRequest.RefreshPolicy
-    //    val method: RestRequest.Method
-    //    val destination: Destination
+    val rollup: Rollup
 
     @Throws(IOException::class)
     constructor(sin: StreamInput) : super(sin) {
         rollupID = sin.readString()
-        seqNo = sin.readLong()
-        primaryTerm = sin.readLong()
-        rPolicy = WriteRequest.RefreshPolicy.readFrom(sin)
+        super.setIfSeqNo(sin.readLong())
+        super.setIfPrimaryTerm(sin.readLong())
+        super.setRefreshPolicy(WriteRequest.RefreshPolicy.readFrom(sin))
         method = sin.readEnum(RestRequest.Method::class.java)
-//        rollup = Rollup.readFrom(sin)
+        rollup = Rollup.readFrom(sin)
     }
 
-    /**
-     * Constructs a new delete rollup request for the specified rollupID.
-     *
-     * @param rollupID The rollupID to delete.
-     */
     constructor(
         rollupID: String,
         seqNo: Long,
@@ -52,13 +34,14 @@ class IndexRollupRequest : IndexRequest {
         rollup: Rollup
     ) {
         this.rollupID = rollupID
-        this.seqNo = seqNo
-        this.primaryTerm = primaryTerm
-        this.rPolicy = refreshPolicy
+        super.setIfSeqNo(seqNo)
+        super.setIfPrimaryTerm(primaryTerm)
+        super.setRefreshPolicy(refreshPolicy)
         this.method = method
-//        this.rollup = rollup
+        this.rollup = rollup
     }
 
+    // TODO
     override fun validate(): ActionRequestValidationException? {
         var validationException: ActionRequestValidationException? = null
         if (rollupID.isBlank()) {
@@ -73,5 +56,10 @@ class IndexRollupRequest : IndexRequest {
     override fun writeTo(out: StreamOutput) {
         super.writeTo(out)
         out.writeString(rollupID)
+        out.writeLong(ifSeqNo())
+        out.writeLong(ifPrimaryTerm())
+        refreshPolicy.writeTo(out)
+        out.writeEnum(method)
+        rollup.writeTo(out)
     }
 }

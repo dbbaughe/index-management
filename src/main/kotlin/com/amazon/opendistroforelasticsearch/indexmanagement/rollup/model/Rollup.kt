@@ -210,7 +210,10 @@ data class Rollup(
             val histograms = mutableListOf<HistogramDimension>()
             val metrics = mutableListOf<RollupMetrics>()
 
+            println("Inside rollup parse")
+
             ensureExpectedToken(Token.START_OBJECT, xcp.currentToken(), xcp::getTokenLocation)
+            println("Inside rollup parse about to execute while loop")
             while (xcp.nextToken() != Token.END_OBJECT) {
                 val fieldName = xcp.currentName()
                 xcp.nextToken()
