@@ -31,8 +31,14 @@ import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagemen
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.resthandler.RestRemovePolicyAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.resthandler.RestRetryFailedManagedIndexAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.settings.ManagedIndexSettings
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.RollupRunner
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.delete.DeleteRollupAction
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.delete.TransportDeleteRollupAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.Rollup
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.resthandler.RestDeleteRollupAction
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.resthandler.RestGetRollupAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.resthandler.RestIndexRollupAction
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.settings.RollupSettings
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.JobSchedulerExtension
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.ScheduledJobParser
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.ScheduledJobRunner
@@ -133,7 +139,9 @@ internal class IndexManagementPlugin : JobSchedulerExtension, SearchPlugin, Acti
             RestAddPolicyAction(),
             RestRemovePolicyAction(),
             RestChangePolicyAction(clusterService),
-            RestIndexRollupAction(settings, clusterService, indexManagementIndices)
+            RestIndexRollupAction(settings, clusterService, indexManagementIndices),
+            RestGetRollupAction(),
+            RestDeleteRollupAction()
         )
     }
 
@@ -159,7 +167,12 @@ internal class IndexManagementPlugin : JobSchedulerExtension, SearchPlugin, Acti
             .registerScriptService(scriptService)
             .registerSettings(settings)
             .registerConsumers() // registerConsumers must happen after registerSettings/clusterService
-
+        val rollupRunner = RollupRunner
+            .registerClient(client)
+            .registerClusterService(clusterService)
+            .registerNamedXContentRegistry(xContentRegistry)
+            .registerScriptService(scriptService)
+            .registerSettings(settings)
         indexManagementIndices = IndexManagementIndices(client.admin().indices(), clusterService)
         val indexStateManagementHistory =
             IndexStateManagementHistory(
@@ -190,16 +203,16 @@ internal class IndexManagementPlugin : JobSchedulerExtension, SearchPlugin, Acti
             ManagedIndexSettings.SWEEP_PERIOD,
             ManagedIndexSettings.COORDINATOR_BACKOFF_COUNT,
             ManagedIndexSettings.COORDINATOR_BACKOFF_MILLIS,
-            ManagedIndexSettings.ALLOW_LIST
+            ManagedIndexSettings.ALLOW_LIST,
+            RollupSettings.ROLLUP_ENABLED,
+            RollupSettings.ROLLUP_INDEX
         )
     }
 
     override fun getActions(): List<ActionPlugin.ActionHandler<out ActionRequest, out ActionResponse>> {
         return listOf(
-            ActionPlugin.ActionHandler(
-                UpdateManagedIndexMetaDataAction.INSTANCE,
-                TransportUpdateManagedIndexMetaDataAction::class.java
-            )
+            ActionPlugin.ActionHandler(UpdateManagedIndexMetaDataAction.INSTANCE, TransportUpdateManagedIndexMetaDataAction::class.java),
+            ActionPlugin.ActionHandler(DeleteRollupAction.INSTANCE, TransportDeleteRollupAction::class.java)
         )
     }
 }

@@ -17,13 +17,15 @@ Content-Type: application/json
     "page_size": 100,
     "delay": 0,
     "dimensions": {
-      "terms": {
-          "fields": ["example_field"]
-      },
       "date_histogram": {
           "field": "@timestamp",
-          "fixed_interval": "1h"
+          "fixed_interval": "1h",
+          "timezone": "1h"
       }
     }
   }
 }
+
+###
+DELETE localhost:9200/_opendistro/_rollup/jobs/example
+Content-Type: application/json

@@ -1,6 +1,8 @@
-package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model
+package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimensions
 
-import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.model.State
+import org.elasticsearch.common.io.stream.StreamInput
+import org.elasticsearch.common.io.stream.StreamOutput
+import org.elasticsearch.common.io.stream.Writeable
 import org.elasticsearch.common.xcontent.ToXContent
 import org.elasticsearch.common.xcontent.ToXContentObject
 import org.elasticsearch.common.xcontent.XContentBuilder
@@ -9,13 +11,24 @@ import org.elasticsearch.common.xcontent.XContentParser.Token
 import org.elasticsearch.common.xcontent.XContentParserUtils.ensureExpectedToken
 import java.io.IOException
 
-data class RollupHistogram(val field: String, val interval: Long): ToXContentObject {
+data class HistogramDimension(val field: String, val interval: Long): ToXContentObject, Writeable {
+
+    @Throws(IOException::class)
+    constructor(sin: StreamInput): this(
+        field = sin.readString(),
+        interval = sin.readLong()
+    )
 
     override fun toXContent(builder: XContentBuilder, params: ToXContent.Params): XContentBuilder {
-        builder
-            .startObject()
+        return builder.startObject()
+            .field(HISTOGRAM_FIELD_FIELD, field)
+            .field(HISTOGRAM_INTERVAL_FIELD, interval)
             .endObject()
-        return builder
+    }
+
+    override fun writeTo(out: StreamOutput) {
+        out.writeString(field)
+        out.writeLong(interval)
     }
 
     companion object {
@@ -26,7 +39,7 @@ data class RollupHistogram(val field: String, val interval: Long): ToXContentObj
         @Suppress("ComplexMethod", "LongMethod")
         @JvmStatic
         @Throws(IOException::class)
-        fun parse(xcp: XContentParser): RollupHistogram {
+        fun parse(xcp: XContentParser): HistogramDimension {
             var field: String? = null
             var interval: Long? = null
 
@@ -41,10 +54,14 @@ data class RollupHistogram(val field: String, val interval: Long): ToXContentObj
                 }
             }
 
-            return RollupHistogram(
+            return HistogramDimension(
                 requireNotNull(field) { "Field must be set in histogram" },
                 requireNotNull(interval) { "Interval must be set in histogram" }
             )
         }
+
+        @JvmStatic
+        @Throws(IOException::class)
+        fun readFrom(sin: StreamInput) = HistogramDimension(sin)
     }
 }

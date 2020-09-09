@@ -529,6 +529,28 @@
                   "type": "keyword"
                 }
               }
+            },
+            "histogram": {
+              "type": "nested",
+              "properties": {
+                "field": {
+                  "type": "keyword"
+                },
+                "interval": {
+                  "type": "long"
+                }
+              }
+            }
+          }
+        },
+        "metrics": {
+          "type": "nested",
+          "properties": {
+            "field": {
+              "type": "keyword"
+            },
+            "metrics": {
+              "type": "keyword"
             }
           }
         }

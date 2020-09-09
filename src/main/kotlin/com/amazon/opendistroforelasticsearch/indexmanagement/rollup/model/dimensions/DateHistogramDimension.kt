@@ -1,5 +1,8 @@
-package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model
+package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimensions
 
+import org.elasticsearch.common.io.stream.StreamInput
+import org.elasticsearch.common.io.stream.StreamOutput
+import org.elasticsearch.common.io.stream.Writeable
 import org.elasticsearch.common.xcontent.ToXContent
 import org.elasticsearch.common.xcontent.ToXContentObject
 import org.elasticsearch.common.xcontent.XContentBuilder
@@ -8,27 +11,42 @@ import org.elasticsearch.common.xcontent.XContentParser.Token
 import org.elasticsearch.common.xcontent.XContentParserUtils.ensureExpectedToken
 import java.io.IOException
 
-data class RollupDateHistogram(
+data class DateHistogramDimension(
     val field: String,
     val fixedInterval: String?,
     val calendarInterval: String?,
     val timezone: String
-): ToXContentObject {
+): ToXContentObject, Writeable {
 
     init {
         require(fixedInterval != null || calendarInterval != null) { "Must specify a fixed or calendar interval" }
         require(fixedInterval == null || calendarInterval == null) { "Can only specify a fixed or calendar interval" }
     }
 
+    @Throws(IOException::class)
+    constructor(sin: StreamInput): this(
+        field = sin.readString(),
+        fixedInterval = sin.readOptionalString(),
+        calendarInterval = sin.readOptionalString(),
+        timezone = sin.readString()
+    )
+
     override fun toXContent(builder: XContentBuilder, params: ToXContent.Params): XContentBuilder {
+        builder.startObject()
+        if (fixedInterval != null) builder.field(FIXED_INTERVAL_FIELD, fixedInterval)
+        if (calendarInterval != null) builder.field(CALENDAR_INTERVAL_FIELD, calendarInterval)
         builder
-            .startObject()
-            .field(FIXED_INTERVAL_FIELD, fixedInterval)
-            .field(CALENDAR_INTERVAL_FIELD, calendarInterval)
             .field(DATE_HISTOGRAM_FIELD_FIELD, field)
             .field(DATE_HISTOGRAM_TIMEZONE_FIELD, timezone)
-            .endObject()
+        .endObject()
         return builder
+    }
+
+    override fun writeTo(out: StreamOutput) {
+        out.writeString(field)
+        out.writeOptionalString(fixedInterval)
+        out.writeOptionalString(calendarInterval)
+        out.writeString(timezone)
     }
 
     companion object {
@@ -41,7 +59,7 @@ data class RollupDateHistogram(
         @Suppress("ComplexMethod", "LongMethod")
         @JvmStatic
         @Throws(IOException::class)
-        fun parse(xcp: XContentParser): RollupDateHistogram {
+        fun parse(xcp: XContentParser): DateHistogramDimension {
             var field: String? = null
             var fixedInterval: String? = null
             var calendarInterval: String? = null
@@ -60,12 +78,16 @@ data class RollupDateHistogram(
                     else -> throw IllegalArgumentException("Invalid field: [$fieldName] found in Rollup terms aggregation.")
                 }
             }
-            return RollupDateHistogram(
+            return DateHistogramDimension(
                 field = requireNotNull(field) { "Field must not be null in date histogram" },
                 fixedInterval = fixedInterval,
                 calendarInterval = calendarInterval,
                 timezone = timezone
             )
         }
+
+        @JvmStatic
+        @Throws(IOException::class)
+        fun readFrom(sin: StreamInput) = DateHistogramDimension(sin)
     }
 }

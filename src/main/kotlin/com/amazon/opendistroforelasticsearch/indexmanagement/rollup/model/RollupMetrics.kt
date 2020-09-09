@@ -1,11 +1,35 @@
 package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model
 
+import org.elasticsearch.common.io.stream.StreamInput
+import org.elasticsearch.common.io.stream.StreamOutput
+import org.elasticsearch.common.io.stream.Writeable
+import org.elasticsearch.common.xcontent.ToXContent
+import org.elasticsearch.common.xcontent.ToXContentObject
+import org.elasticsearch.common.xcontent.XContentBuilder
 import org.elasticsearch.common.xcontent.XContentParser
 import org.elasticsearch.common.xcontent.XContentParser.Token
 import org.elasticsearch.common.xcontent.XContentParserUtils.ensureExpectedToken
 import java.io.IOException
 
-data class RollupMetrics(val field: String, val metrics: List<String>) {
+data class RollupMetrics(val field: String, val metrics: List<String>): ToXContentObject, Writeable {
+
+    @Throws(IOException::class)
+    constructor(sin: StreamInput): this(
+        field = sin.readString(),
+        metrics = sin.readStringArray().toList()
+    )
+
+    override fun toXContent(builder: XContentBuilder, params: ToXContent.Params): XContentBuilder {
+        return builder.startObject()
+            .field(METRICS_FIELD_FIELD, field)
+            .field(METRICS_METRICS_FIELD, metrics.toTypedArray())
+            .endObject()
+    }
+
+    override fun writeTo(out: StreamOutput) {
+        out.writeString(field)
+        out.writeStringArray(metrics.toTypedArray())
+    }
 
     companion object {
         const val METRICS_FIELD = "metrics"
@@ -37,5 +61,9 @@ data class RollupMetrics(val field: String, val metrics: List<String>) {
 
             return RollupMetrics(requireNotNull(field) { "Field must not be null in rollup metrics" }, metrics)
         }
+
+        @JvmStatic
+        @Throws(IOException::class)
+        fun readFrom(sin: StreamInput) = RollupMetrics(sin)
     }
 }

@@ -17,10 +17,18 @@ package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model
 
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.elasticapi.instant
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.elasticapi.optionalTimeField
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimensions.DateHistogramDimension
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimensions.HistogramDimension
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimensions.TermsDimension
 import com.amazon.opendistroforelasticsearch.indexmanagement.util.IndexUtils
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.ScheduledJobParameter
+import com.amazon.opendistroforelasticsearch.jobscheduler.spi.schedule.CronSchedule
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.schedule.Schedule
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.schedule.ScheduleParser
+import org.elasticsearch.common.ParseField
+import org.elasticsearch.common.io.stream.StreamInput
+import org.elasticsearch.common.io.stream.StreamOutput
+import org.elasticsearch.common.io.stream.Writeable
 import org.elasticsearch.common.xcontent.ToXContent
 import org.elasticsearch.common.xcontent.XContentBuilder
 import org.elasticsearch.common.xcontent.XContentParser
@@ -42,14 +50,15 @@ data class Rollup(
     val description: String,
     val sourceIndex: String,
     val targetIndex: String,
+    val metadataID: String?,
     val roles: List<String>,
     val pageSize: Long,
     val delay: Long,
-    val terms: RollupTerms?,
-    val dateHistogram: RollupDateHistogram,
-    val histograms: List<RollupHistogram>,
+    val termsDimension: TermsDimension?,
+    val dateHistogramDimension: DateHistogramDimension,
+    val histogramDimensions: List<HistogramDimension>,
     val metrics: List<RollupMetrics>
-) : ScheduledJobParameter {
+) : ScheduledJobParameter, Writeable {
 
     init {
         if (enabled) {
@@ -71,6 +80,29 @@ data class Rollup(
 
     override fun getLockDurationSeconds(): Long = 3600L // 1 hour
 
+    @Throws(IOException::class)
+    constructor(sin: StreamInput): this(
+        id = sin.readString(),
+        seqNo = sin.readLong(),
+        primaryTerm = sin.readLong(),
+        enabled = sin.readBoolean(),
+        schemaVersion = sin.readLong(),
+        jobSchedule = ScheduleParser.readFrom(sin),
+        jobLastUpdatedTime = sin.readInstant(),
+        jobEnabledTime = sin.readOptionalInstant(),
+        description = sin.readString(),
+        sourceIndex = sin.readString(),
+        targetIndex = sin.readString(),
+        metadataID = sin.readOptionalString(),
+        roles = sin.readStringArray().toList(),
+        pageSize = sin.readLong(),
+        delay = sin.readLong(),
+        termsDimension = if (sin.readBoolean()) TermsDimension.readFrom(sin) else null,
+        dateHistogramDimension = DateHistogramDimension.readFrom(sin),
+        histogramDimensions = sin.readList(::HistogramDimension),
+        metrics = sin.readList(::RollupMetrics)
+    )
+
     override fun toXContent(builder: XContentBuilder, params: ToXContent.Params): XContentBuilder {
         builder
             .startObject()
@@ -82,18 +114,53 @@ data class Rollup(
                     .field(DESCRIPTION_FIELD, description)
                     .field(SOURCE_INDEX_FIELD, sourceIndex)
                     .field(TARGET_INDEX_FIELD, targetIndex)
+                    .field(METADATA_ID_FIELD, metadataID)
                     .field(ROLES_FIELD, roles.toTypedArray())
                     .field(PAGE_SIZE_FIELD, pageSize)
                     .field(DELAY_FIELD, delay)
                     .startObject(DIMENSIONS_FIELD)
-                        .field(RollupTerms.TERMS_FIELD, terms)
-                        .field(RollupDateHistogram.DATE_HISTOGRAM_FIELD, dateHistogram)
-                        .field(RollupHistogram.HISTOGRAM_FIELD, histograms.toTypedArray())
+                        .field(TermsDimension.TERMS_FIELD, termsDimension)
+                        .field(DateHistogramDimension.DATE_HISTOGRAM_FIELD, dateHistogramDimension)
+                        .field(HistogramDimension.HISTOGRAM_FIELD, histogramDimensions.toTypedArray())
                     .endObject()
                     .field(RollupMetrics.METRICS_FIELD, metrics.toTypedArray())
                 .endObject()
             .endObject()
         return builder
+    }
+
+
+    override fun writeTo(out: StreamOutput) {
+        out.writeString(id)
+        out.writeLong(seqNo)
+        out.writeLong(primaryTerm)
+        out.writeBoolean(enabled)
+        out.writeLong(schemaVersion)
+        if (schedule is CronSchedule) {
+            out.writeEnum(Schedule.Type.CRON)
+        } else {
+            out.writeEnum(Schedule.Type.INTERVAL)
+        }
+        out.writeInstant(jobLastUpdatedTime)
+        out.writeOptionalInstant(jobEnabledTime)
+        out.writeString(description)
+        out.writeString(sourceIndex)
+        out.writeString(targetIndex)
+        out.writeOptionalString(metadataID)
+        out.writeStringArray(roles.toTypedArray())
+        out.writeLong(pageSize)
+        out.writeLong(delay)
+        if (termsDimension == null) {
+            out.writeBoolean(false)
+        } else {
+            out.writeBoolean(true)
+            termsDimension.writeTo(out)
+        }
+        dateHistogramDimension.writeTo(out)
+        out.writeCollection(histogramDimensions)
+        out.writeCollection(metrics)
+
+
     }
 
     companion object {
@@ -107,10 +174,13 @@ data class Rollup(
         const val DESCRIPTION_FIELD = "description"
         const val SOURCE_INDEX_FIELD = "source_index"
         const val TARGET_INDEX_FIELD = "target_index"
+        const val METADATA_ID_FIELD = "metadata_id"
         const val ROLES_FIELD = "roles"
         const val PAGE_SIZE_FIELD = "page_size"
         const val DELAY_FIELD = "delay"
         const val DIMENSIONS_FIELD = "dimensions"
+
+        val test = ParseField("something")
 
 
         @Suppress("ComplexMethod", "LongMethod")
@@ -131,14 +201,14 @@ data class Rollup(
             var description: String? = null
             var sourceIndex: String? = null
             var targetIndex: String? = null
+            var metadataID: String? = null
             val roles = mutableListOf<String>()
             var pageSize: Long? = null
             var delay: Long? = null
-            var dateHistogram: RollupDateHistogram? = null
-            var terms: RollupTerms? = null
-            val histograms = mutableListOf<RollupHistogram>()
+            var dateHistogramDimension: DateHistogramDimension? = null
+            var termsDimension: TermsDimension? = null
+            val histograms = mutableListOf<HistogramDimension>()
             val metrics = mutableListOf<RollupMetrics>()
-            //var metrics
 
             ensureExpectedToken(Token.START_OBJECT, xcp.currentToken(), xcp::getTokenLocation)
             while (xcp.nextToken() != Token.END_OBJECT) {
@@ -154,6 +224,7 @@ data class Rollup(
                     DESCRIPTION_FIELD -> description = xcp.text()
                     SOURCE_INDEX_FIELD -> sourceIndex = xcp.text()
                     TARGET_INDEX_FIELD -> targetIndex = xcp.text()
+                    METADATA_ID_FIELD -> metadataID = xcp.textOrNull()
                     ROLES_FIELD -> {
                         ensureExpectedToken(Token.START_ARRAY, xcp.currentToken(), xcp::getTokenLocation)
                         while (xcp.nextToken() != Token.END_ARRAY) {
@@ -169,22 +240,22 @@ data class Rollup(
                             xcp.nextToken()
 
                             when (dimensionsFieldName) {
-                                RollupTerms.TERMS_FIELD -> terms = RollupTerms.parse(xcp)
-                                RollupDateHistogram.DATE_HISTOGRAM_FIELD -> dateHistogram = RollupDateHistogram.parse(xcp)
-                                RollupHistogram.HISTOGRAM_FIELD -> {
+                                TermsDimension.TERMS_FIELD -> termsDimension = if (xcp.currentToken() == Token.VALUE_NULL) null else TermsDimension.parse(xcp)
+                                DateHistogramDimension.DATE_HISTOGRAM_FIELD -> dateHistogramDimension = DateHistogramDimension.parse(xcp)
+                                HistogramDimension.HISTOGRAM_FIELD -> {
                                     ensureExpectedToken(Token.START_ARRAY, xcp.currentToken(), xcp::getTokenLocation)
                                     while (xcp.nextToken() != Token.END_ARRAY) {
-                                        histograms.add(RollupHistogram.parse(xcp))
-                                    }
-                                }
-                                RollupMetrics.METRICS_FIELD -> {
-                                    ensureExpectedToken(Token.START_ARRAY, xcp.currentToken(), xcp::getTokenLocation)
-                                    while (xcp.nextToken() != Token.END_ARRAY) {
-                                        metrics.add(RollupMetrics.parse(xcp))
+                                        histograms.add(HistogramDimension.parse(xcp))
                                     }
                                 }
                                 else -> throw IllegalArgumentException("Invalid field: [$dimensionsFieldName] found in Rollup dimensions.")
                             }
+                        }
+                    }
+                    RollupMetrics.METRICS_FIELD -> {
+                        ensureExpectedToken(Token.START_ARRAY, xcp.currentToken(), xcp::getTokenLocation)
+                        while (xcp.nextToken() != Token.END_ARRAY) {
+                            metrics.add(RollupMetrics.parse(xcp))
                         }
                     }
                     else -> throw IllegalArgumentException("Invalid field: [$fieldName] found in Rollup.")
@@ -208,12 +279,13 @@ data class Rollup(
                 description = requireNotNull(description) { "Rollup description is null" },
                 sourceIndex = requireNotNull(sourceIndex) { "Rollup source index is null" },
                 targetIndex = requireNotNull(targetIndex) { "Rollup target index is null" },
+                metadataID = metadataID,
                 roles = roles.toList(),
                 pageSize = requireNotNull(pageSize) { "Rollup page size is null" },
                 delay = requireNotNull(delay) { "Rollup delay is null" },
-                terms = terms,
-                dateHistogram = requireNotNull(dateHistogram) { "Rollup date histogram is required" },
-                histograms = histograms,
+                termsDimension = termsDimension,
+                dateHistogramDimension = requireNotNull(dateHistogramDimension) { "Rollup date histogram is required" },
+                histogramDimensions = histograms,
                 metrics = metrics
             )
         }
@@ -234,5 +306,9 @@ data class Rollup(
             ensureExpectedToken(Token.END_OBJECT, xcp.nextToken(), xcp::getTokenLocation)
             return rollup
         }
+
+        @JvmStatic
+        @Throws(IOException::class)
+        fun readFrom(sin: StreamInput): Rollup = Rollup(sin)
     }
 }
