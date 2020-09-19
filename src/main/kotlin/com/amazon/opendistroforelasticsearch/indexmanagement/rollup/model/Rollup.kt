@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License").
  * You may not use this file except in compliance with the License.
@@ -17,9 +17,11 @@ package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model
 
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.elasticapi.instant
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.elasticapi.optionalTimeField
-import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimensions.DateHistogramDimension
-import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimensions.HistogramDimension
-import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimensions.TermsDimension
+import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.util.WITH_TYPE
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimension.DateHistogram
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimension.Dimension
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimension.Histogram
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimension.Terms
 import com.amazon.opendistroforelasticsearch.indexmanagement.util.IndexUtils
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.ScheduledJobParameter
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.schedule.CronSchedule
@@ -54,9 +56,7 @@ data class Rollup(
     val roles: List<String>,
     val pageSize: Long,
     val delay: Long,
-    val termsDimension: TermsDimension?,
-    val dateHistogramDimension: DateHistogramDimension,
-    val histogramDimensions: List<HistogramDimension>,
+    val dimensions: List<Dimension>,
     val metrics: List<RollupMetrics>
 ) : ScheduledJobParameter, Writeable {
 
@@ -97,35 +97,41 @@ data class Rollup(
         roles = sin.readStringArray().toList(),
         pageSize = sin.readLong(),
         delay = sin.readLong(),
-        termsDimension = if (sin.readBoolean()) TermsDimension.readFrom(sin) else null,
-        dateHistogramDimension = DateHistogramDimension.readFrom(sin),
-        histogramDimensions = sin.readList(::HistogramDimension),
+        dimensions = sin.let {
+            val dimensionsList = mutableListOf<Dimension>()
+            val size = it.readVInt()
+            for (i in 0..size) {
+                val type = it.readString()
+                when (type) {
+                    Dimension.Type.DATE_HISTOGRAM.type -> DateHistogram(sin)
+                    Dimension.Type.TERMS.type -> Terms(sin)
+                    Dimension.Type.HISTOGRAM.type -> Histogram(sin)
+                    else -> throw IllegalArgumentException("Invalid dimension type [$type] found in rollup stream input")
+                }
+            }
+            dimensionsList
+        },
         metrics = sin.readList(::RollupMetrics)
     )
 
     override fun toXContent(builder: XContentBuilder, params: ToXContent.Params): XContentBuilder {
-        builder
-            .startObject()
-                .startObject(ROLLUP_TYPE)
-                    .field(ENABLED_FIELD, enabled)
-                    .field(SCHEDULE_FIELD, jobSchedule)
-                    .optionalTimeField(LAST_UPDATED_TIME_FIELD, jobLastUpdatedTime)
-                    .optionalTimeField(ENABLED_TIME_FIELD, jobEnabledTime)
-                    .field(DESCRIPTION_FIELD, description)
-                    .field(SOURCE_INDEX_FIELD, sourceIndex)
-                    .field(TARGET_INDEX_FIELD, targetIndex)
-                    .field(METADATA_ID_FIELD, metadataID)
-                    .field(ROLES_FIELD, roles.toTypedArray())
-                    .field(PAGE_SIZE_FIELD, pageSize)
-                    .field(DELAY_FIELD, delay)
-                    .startObject(DIMENSIONS_FIELD)
-                        .field(TermsDimension.TERMS_FIELD, termsDimension)
-                        .field(DateHistogramDimension.DATE_HISTOGRAM_FIELD, dateHistogramDimension)
-                        .field(HistogramDimension.HISTOGRAM_FIELD, histogramDimensions.toTypedArray())
-                    .endObject()
-                    .field(RollupMetrics.METRICS_FIELD, metrics.toTypedArray())
-                .endObject()
-            .endObject()
+        if (params.paramAsBoolean("WITH_START_OBJECT", true)) builder.startObject()
+        if (params.paramAsBoolean(WITH_TYPE, true)) builder.startObject(ROLLUP_TYPE)
+        builder.field(ENABLED_FIELD, enabled)
+            .field(SCHEDULE_FIELD, jobSchedule)
+            .optionalTimeField(LAST_UPDATED_TIME_FIELD, jobLastUpdatedTime)
+            .optionalTimeField(ENABLED_TIME_FIELD, jobEnabledTime)
+            .field(DESCRIPTION_FIELD, description)
+            .field(SOURCE_INDEX_FIELD, sourceIndex)
+            .field(TARGET_INDEX_FIELD, targetIndex)
+            .field(METADATA_ID_FIELD, metadataID)
+            .field(ROLES_FIELD, roles.toTypedArray())
+            .field(PAGE_SIZE_FIELD, pageSize)
+            .field(DELAY_FIELD, delay)
+            .field(DIMENSIONS_FIELD, dimensions.toTypedArray())
+            .field(RollupMetrics.METRICS_FIELD, metrics.toTypedArray())
+        if (params.paramAsBoolean(WITH_TYPE, true)) builder.endObject()
+        if (params.paramAsBoolean("WITH_START_OBJECT", true)) builder.endObject()
         return builder
     }
 
@@ -150,14 +156,16 @@ data class Rollup(
         out.writeStringArray(roles.toTypedArray())
         out.writeLong(pageSize)
         out.writeLong(delay)
-        if (termsDimension == null) {
-            out.writeBoolean(false)
-        } else {
-            out.writeBoolean(true)
-            termsDimension.writeTo(out)
+        out.writeVInt(dimensions.size)
+        for (dimension in dimensions) {
+            out.writeString(dimension.type.type)
+            when (dimension) {
+                is DateHistogram -> dimension.writeTo(out)
+                is Terms -> dimension.writeTo(out)
+                is Histogram -> dimension.writeTo(out)
+            }
         }
-        dateHistogramDimension.writeTo(out)
-        out.writeCollection(histogramDimensions)
+        out.writeCollection(dimensions)
         out.writeCollection(metrics)
 
 
@@ -205,15 +213,11 @@ data class Rollup(
             val roles = mutableListOf<String>()
             var pageSize: Long? = null
             var delay: Long? = null
-            var dateHistogramDimension: DateHistogramDimension? = null
-            var termsDimension: TermsDimension? = null
-            val histograms = mutableListOf<HistogramDimension>()
+            val dimensions = mutableListOf<Dimension>()
             val metrics = mutableListOf<RollupMetrics>()
 
-            println("Inside rollup parse")
-
             ensureExpectedToken(Token.START_OBJECT, xcp.currentToken(), xcp::getTokenLocation)
-            println("Inside rollup parse about to execute while loop")
+
             while (xcp.nextToken() != Token.END_OBJECT) {
                 val fieldName = xcp.currentName()
                 xcp.nextToken()
@@ -237,22 +241,9 @@ data class Rollup(
                     PAGE_SIZE_FIELD -> pageSize = xcp.longValue()
                     DELAY_FIELD -> delay = xcp.longValue()
                     DIMENSIONS_FIELD -> {
-                        ensureExpectedToken(Token.START_OBJECT, xcp.currentToken(), xcp::getTokenLocation)
-                        while (xcp.nextToken() != Token.END_OBJECT) {
-                            val dimensionsFieldName = xcp.currentName()
-                            xcp.nextToken()
-
-                            when (dimensionsFieldName) {
-                                TermsDimension.TERMS_FIELD -> termsDimension = if (xcp.currentToken() == Token.VALUE_NULL) null else TermsDimension.parse(xcp)
-                                DateHistogramDimension.DATE_HISTOGRAM_FIELD -> dateHistogramDimension = DateHistogramDimension.parse(xcp)
-                                HistogramDimension.HISTOGRAM_FIELD -> {
-                                    ensureExpectedToken(Token.START_ARRAY, xcp.currentToken(), xcp::getTokenLocation)
-                                    while (xcp.nextToken() != Token.END_ARRAY) {
-                                        histograms.add(HistogramDimension.parse(xcp))
-                                    }
-                                }
-                                else -> throw IllegalArgumentException("Invalid field: [$dimensionsFieldName] found in Rollup dimensions.")
-                            }
+                        ensureExpectedToken(Token.START_ARRAY, xcp.currentToken(), xcp::getTokenLocation)
+                        while (xcp.nextToken() != Token.END_ARRAY) {
+                            dimensions.add(Dimension.parse(xcp))
                         }
                     }
                     RollupMetrics.METRICS_FIELD -> {
@@ -286,9 +277,7 @@ data class Rollup(
                 roles = roles.toList(),
                 pageSize = requireNotNull(pageSize) { "Rollup page size is null" },
                 delay = requireNotNull(delay) { "Rollup delay is null" },
-                termsDimension = termsDimension,
-                dateHistogramDimension = requireNotNull(dateHistogramDimension) { "Rollup date histogram is required" },
-                histogramDimensions = histograms,
+                dimensions = dimensions,
                 metrics = metrics
             )
         }

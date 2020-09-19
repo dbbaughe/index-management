@@ -15,39 +15,42 @@
 
 package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.resthandler
 
-import com.amazon.opendistroforelasticsearch.indexmanagement.IndexManagementPlugin.Companion.INDEX_MANAGEMENT_INDEX
 import com.amazon.opendistroforelasticsearch.indexmanagement.IndexManagementPlugin.Companion.ROLLUP_JOBS_BASE_URI
-import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.delete.DeleteRollupAction
-import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.delete.DeleteRollupRequest
-import com.amazon.opendistroforelasticsearch.indexmanagement.util.REFRESH
-import org.elasticsearch.action.support.WriteRequest.RefreshPolicy
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.stop.StopRollupAction
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.stop.StopRollupRequest
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.Rollup
 import org.elasticsearch.client.node.NodeClient
 import org.elasticsearch.rest.BaseRestHandler
 import org.elasticsearch.rest.RestHandler.Route
+import org.elasticsearch.rest.BaseRestHandler.RestChannelConsumer
 import org.elasticsearch.rest.RestRequest
-import org.elasticsearch.rest.RestRequest.Method.DELETE
+import org.elasticsearch.rest.RestRequest.Method.PUT
 import org.elasticsearch.rest.action.RestToXContentListener
 import java.io.IOException
 
-class RestDeleteRollupAction : BaseRestHandler() {
+class RestStopRollupAction() : BaseRestHandler() {
 
     override fun routes(): List<Route> {
         return listOf(
-            Route(DELETE, "$ROLLUP_JOBS_BASE_URI/{rollupID}")
+            Route(PUT, "$ROLLUP_JOBS_BASE_URI/{rollupID}/_stop")
         )
     }
 
-    override fun getName(): String = "delete_rollup_action"
+    // TODO: what is elastics rollup name? will there be conflicts? maybe prefix with opendistro
+    override fun getName(): String {
+        return "stop_rollup_action"
+    }
 
     @Throws(IOException::class)
     override fun prepareRequest(request: RestRequest, client: NodeClient): RestChannelConsumer {
-        val rollupID = request.param("rollupID")
-        val refreshPolicy = RefreshPolicy.parse(request.param(REFRESH, RefreshPolicy.IMMEDIATE.value))
+        val id = request.param("rollupID", Rollup.NO_ID)
+        if (Rollup.NO_ID == id) {
+            throw IllegalArgumentException("Missing rollup ID")
+        }
+
+        val stopRequest = StopRollupRequest(id)
         return RestChannelConsumer { channel ->
-            channel.newBuilder()
-            val deleteRollupRequest = DeleteRollupRequest(rollupID)
-                .setRefreshPolicy(refreshPolicy)
-            client.execute(DeleteRollupAction.INSTANCE, deleteRollupRequest, RestToXContentListener(channel))
+            client.execute(StopRollupAction.INSTANCE, stopRequest, RestToXContentListener(channel))
         }
     }
 }

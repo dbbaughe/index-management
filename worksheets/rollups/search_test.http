@@ -1,0 +1,66 @@
+PUT localhost:9200/_opendistro/_rollup/jobs/example
+Content-Type: application/json
+
+{
+  "rollup": {
+    "enabled": true,
+    "schedule": {
+      "interval": {
+        "period": 1,
+        "unit": "Minutes",
+        "start_time": {{$timestamp}}
+      }
+    },
+    "last_updated_time": {{$timestamp}},
+    "description": "An exmaple policy that rolls up the sample ecommerce data",
+    "source_index": "kibana_sample_data_ecommerce",
+    "target_index": "rollup-test-index",
+    "page_size": 100,
+    "delay": 0,
+    "dimensions": [
+      {
+        "date_histogram": {
+          "field": "order_date",
+          "fixed_interval": "1h",
+          "timezone": "America/Los_Angeles"
+        }
+      },
+      {
+        "terms": {
+          "field": "geoip.city_name"
+        }
+      }
+    ],
+    "metrics": [
+      {
+        "field": "taxless_total_price",
+        "metrics": ["sum"]
+      }
+    ]
+  }
+}
+
+
+###
+POST localhost:9200/rollup-test-index/_search
+Content-Type: application/json
+
+{
+  "size": 0,
+  "aggs": {
+    "city": {
+      "terms": {
+        "field": "geoip.city_name",
+        "size": 5,
+        "order": {"total_sales": "desc"}
+      },
+      "aggs": {
+        "total_sales": {
+          "sum": {
+            "field": "taxless_total_price"
+          }
+        }
+      }
+    }
+  }
+}

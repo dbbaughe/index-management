@@ -31,55 +31,93 @@ import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagemen
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.resthandler.RestRemovePolicyAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.resthandler.RestRetryFailedManagedIndexAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.settings.ManagedIndexSettings
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.RollupActionFilter
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.RollupInterceptor
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.RollupRunner
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.RollupSearchListener
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.delete.DeleteRollupAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.delete.TransportDeleteRollupAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.get.GetRollupAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.get.TransportGetRollupAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.index.IndexRollupAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.index.TransportIndexRollupAction
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.start.StartRollupAction
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.start.TransportStartRollupAction
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.stop.StopRollupAction
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.stop.TransportStopRollupAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.Rollup
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.resthandler.RestDeleteRollupAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.resthandler.RestGetRollupAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.resthandler.RestIndexRollupAction
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.resthandler.RestStartRollupAction
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.resthandler.RestStopRollupAction
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.settings.RollupSettings
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.JobSchedulerExtension
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.ScheduledJobParser
 import com.amazon.opendistroforelasticsearch.jobscheduler.spi.ScheduledJobRunner
 import org.apache.logging.log4j.LogManager
+import org.apache.lucene.queryparser.xml.builders.MatchAllDocsQueryBuilder
+import org.apache.lucene.search.MatchAllDocsQuery
+import org.elasticsearch.ElasticsearchException
+import org.elasticsearch.ElasticsearchStatusException
+import org.elasticsearch.action.ActionListener
 import org.elasticsearch.action.ActionRequest
 import org.elasticsearch.action.ActionResponse
+import org.elasticsearch.action.bulk.BulkRequest
+import org.elasticsearch.action.search.MultiSearchRequest
+import org.elasticsearch.action.search.SearchRequest
+import org.elasticsearch.action.search.SearchTask
+import org.elasticsearch.action.support.ActionFilter
+import org.elasticsearch.action.support.ActionFilterChain
 import org.elasticsearch.client.Client
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver
 import org.elasticsearch.cluster.node.DiscoveryNodes
 import org.elasticsearch.cluster.service.ClusterService
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry
+import org.elasticsearch.common.network.NetworkService
 import org.elasticsearch.common.settings.ClusterSettings
 import org.elasticsearch.common.settings.IndexScopedSettings
 import org.elasticsearch.common.settings.Setting
 import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.common.settings.SettingsFilter
+import org.elasticsearch.common.util.BigArrays
+import org.elasticsearch.common.util.PageCacheRecycler
+import org.elasticsearch.common.util.concurrent.ThreadContext
 import org.elasticsearch.common.xcontent.NamedXContentRegistry
 import org.elasticsearch.common.xcontent.XContentParser.Token
 import org.elasticsearch.common.xcontent.XContentParserUtils.ensureExpectedToken
 import org.elasticsearch.env.Environment
 import org.elasticsearch.env.NodeEnvironment
+import org.elasticsearch.http.HttpServerTransport
+import org.elasticsearch.index.IndexModule
+import org.elasticsearch.index.query.MatchAllQueryBuilder
+import org.elasticsearch.index.query.MatchNoneQueryBuilder
+import org.elasticsearch.index.query.QueryBuilder
+import org.elasticsearch.indices.breaker.CircuitBreakerService
 import org.elasticsearch.plugins.ActionPlugin
+import org.elasticsearch.plugins.NetworkPlugin
 import org.elasticsearch.plugins.Plugin
 import org.elasticsearch.plugins.SearchPlugin
 import org.elasticsearch.repositories.RepositoriesService
 import org.elasticsearch.rest.RestController
 import org.elasticsearch.rest.RestHandler
+import org.elasticsearch.rest.RestStatus
 import org.elasticsearch.script.ScriptService
+import org.elasticsearch.search.builder.SearchSourceBuilder
+import org.elasticsearch.tasks.Task
 import org.elasticsearch.threadpool.ThreadPool
+import org.elasticsearch.transport.TransportInterceptor
 import org.elasticsearch.watcher.ResourceWatcherService
 import java.util.function.Supplier
 
-internal class IndexManagementPlugin : JobSchedulerExtension, SearchPlugin, ActionPlugin, Plugin() {
+internal class IndexManagementPlugin : JobSchedulerExtension, SearchPlugin, ActionPlugin, NetworkPlugin, Plugin() {
 
     private val logger = LogManager.getLogger(javaClass)
     lateinit var indexManagementIndices: IndexManagementIndices
     lateinit var clusterService: ClusterService
+    lateinit var rollupSearchListener: RollupSearchListener
+    lateinit var rollupInterceptor: RollupInterceptor
+    lateinit var indexNameExpressionResolver: IndexNameExpressionResolver
 
     companion object {
         const val PLUGIN_NAME = "opendistro-im"
@@ -145,7 +183,9 @@ internal class IndexManagementPlugin : JobSchedulerExtension, SearchPlugin, Acti
             RestChangePolicyAction(clusterService),
             RestIndexRollupAction(),
             RestGetRollupAction(),
-            RestDeleteRollupAction()
+            RestDeleteRollupAction(),
+            RestStartRollupAction(),
+            RestStopRollupAction()
         )
     }
 
@@ -177,6 +217,10 @@ internal class IndexManagementPlugin : JobSchedulerExtension, SearchPlugin, Acti
             .registerNamedXContentRegistry(xContentRegistry)
             .registerScriptService(scriptService)
             .registerSettings(settings)
+            .registerConsumers()
+        rollupSearchListener = RollupSearchListener(clusterService, indexNameExpressionResolver)
+        rollupInterceptor = RollupInterceptor()
+        this.indexNameExpressionResolver = indexNameExpressionResolver
         indexManagementIndices = IndexManagementIndices(client.admin().indices(), clusterService)
         val indexStateManagementHistory =
             IndexStateManagementHistory(
@@ -209,7 +253,10 @@ internal class IndexManagementPlugin : JobSchedulerExtension, SearchPlugin, Acti
             ManagedIndexSettings.COORDINATOR_BACKOFF_MILLIS,
             ManagedIndexSettings.ALLOW_LIST,
             RollupSettings.ROLLUP_ENABLED,
-            RollupSettings.ROLLUP_INDEX
+            RollupSettings.ROLLUP_INDEX,
+            RollupSettings.ROLLUP_SEARCH_ENABLED,
+            RollupSettings.ROLLUP_INGEST_BACKOFF_COUNT,
+            RollupSettings.ROLLUP_INGEST_BACKOFF_MILLIS
         )
     }
 
@@ -218,7 +265,24 @@ internal class IndexManagementPlugin : JobSchedulerExtension, SearchPlugin, Acti
             ActionPlugin.ActionHandler(UpdateManagedIndexMetaDataAction.INSTANCE, TransportUpdateManagedIndexMetaDataAction::class.java),
             ActionPlugin.ActionHandler(DeleteRollupAction.INSTANCE, TransportDeleteRollupAction::class.java),
             ActionPlugin.ActionHandler(IndexRollupAction.INSTANCE, TransportIndexRollupAction::class.java),
-            ActionPlugin.ActionHandler(GetRollupAction.INSTANCE, TransportGetRollupAction::class.java)
+            ActionPlugin.ActionHandler(GetRollupAction.INSTANCE, TransportGetRollupAction::class.java),
+            ActionPlugin.ActionHandler(StartRollupAction.INSTANCE, TransportStartRollupAction::class.java),
+            ActionPlugin.ActionHandler(StopRollupAction.INSTANCE, TransportStopRollupAction::class.java)
         )
     }
+
+    override fun onIndexModule(indexModule: IndexModule) {
+        val rollupIndex = RollupSettings.ROLLUP_INDEX.get(indexModule.settings)
+        if (rollupIndex) {
+             indexModule.addSearchOperationListener(rollupSearchListener)
+        }
+    }
+
+//    override fun getTransportInterceptors(namedWriteableRegistry: NamedWriteableRegistry, threadContext: ThreadContext): List<TransportInterceptor> {
+//        return listOf(rollupInterceptor)
+//    }
+
+//    override fun getActionFilters(): List<ActionFilter> {
+//        return listOf(RollupActionFilter(clusterService, indexNameExpressionResolver))
+//    }
 }

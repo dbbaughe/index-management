@@ -525,19 +525,18 @@
             },
             "terms": {
               "properties": {
-                "fields": {
+                "field": {
                   "type": "keyword"
                 }
               }
             },
             "histogram": {
-              "type": "nested",
               "properties": {
                 "field": {
                   "type": "keyword"
                 },
                 "interval": {
-                  "type": "long"
+                  "type": "double"
                 }
               }
             }

@@ -1,44 +1,57 @@
-package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimensions
+/*
+ * Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License").
+ * You may not use this file except in compliance with the License.
+ * A copy of the License is located at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * or in the "license" file accompanying this file. This file is distributed
+ * on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+ * express or implied. See the License for the specific language governing
+ * permissions and limitations under the License.
+ */
+
+package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimension
 
 import org.elasticsearch.common.io.stream.StreamInput
 import org.elasticsearch.common.io.stream.StreamOutput
-import org.elasticsearch.common.io.stream.Writeable
 import org.elasticsearch.common.xcontent.ToXContent
-import org.elasticsearch.common.xcontent.ToXContentObject
 import org.elasticsearch.common.xcontent.XContentBuilder
 import org.elasticsearch.common.xcontent.XContentParser
 import org.elasticsearch.common.xcontent.XContentParser.Token
 import org.elasticsearch.common.xcontent.XContentParserUtils.ensureExpectedToken
 import java.io.IOException
 
-data class TermsDimension(val fields: List<String>): ToXContentObject, Writeable {
+data class Terms(val field: String): Dimension(Type.TERMS) {
 
     @Throws(IOException::class)
     constructor(sin: StreamInput): this(
-        fields = sin.readStringArray().toList()
+        field = sin.readString()
     )
 
     override fun toXContent(builder: XContentBuilder, params: ToXContent.Params): XContentBuilder {
-        builder
-            .startObject()
-            .field(TERMS_FIELDS_FIELD, fields)
+        return builder.startObject()
+            .startObject(type.type)
+            .field(TERMS_FIELD_FIELD, field)
             .endObject()
-        return builder
+            .endObject()
     }
 
     override fun writeTo(out: StreamOutput) {
-        out.writeStringArray(fields.toTypedArray())
+        out.writeString(field)
     }
 
     companion object {
         const val TERMS_FIELD = "terms"
-        const val TERMS_FIELDS_FIELD = "fields"
+        const val TERMS_FIELD_FIELD = "field"
 
         @Suppress("ComplexMethod", "LongMethod")
         @JvmStatic
         @Throws(IOException::class)
-        fun parse(xcp: XContentParser): TermsDimension {
-            val fields = mutableListOf<String>()
+        fun parse(xcp: XContentParser): Terms {
+            var field: String? = null
 
             ensureExpectedToken(
                 Token.START_OBJECT,
@@ -50,22 +63,15 @@ data class TermsDimension(val fields: List<String>): ToXContentObject, Writeable
                 xcp.nextToken()
 
                 when (fieldName) {
-                    TERMS_FIELDS_FIELD -> {
-                        ensureExpectedToken(Token.START_ARRAY, xcp.currentToken(), xcp::getTokenLocation)
-                        while (xcp.nextToken() != Token.END_ARRAY) {
-                            fields.add(xcp.text())
-                        }
-                    }
+                    TERMS_FIELD_FIELD -> field = xcp.text()
                     else -> throw IllegalArgumentException("Invalid field: [$fieldName] found in Rollup terms aggregation.")
                 }
             }
-            return TermsDimension(
-                fields.toList()
-            )
+            return Terms(requireNotNull(field) { "Field cannot be null in terms aggregation" })
         }
 
         @JvmStatic
         @Throws(IOException::class)
-        fun readFrom(sin: StreamInput) = TermsDimension(sin)
+        fun readFrom(sin: StreamInput) = Terms(sin)
     }
 }

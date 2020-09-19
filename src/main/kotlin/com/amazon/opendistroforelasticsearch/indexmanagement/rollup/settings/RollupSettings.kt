@@ -16,8 +16,10 @@
 package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.settings
 
 import org.elasticsearch.common.settings.Setting
+import org.elasticsearch.common.unit.TimeValue
 
 class RollupSettings {
+
     companion object {
         const val DEFAULT_ROLLUP_ENABLED = true
 
@@ -28,11 +30,32 @@ class RollupSettings {
             Setting.Property.Dynamic
         )
 
+        val ROLLUP_SEARCH_ENABLED: Setting<Boolean> = Setting.boolSetting(
+            "opendistro.rollup.search.enabled",
+            true,
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
+        )
+
         val ROLLUP_INDEX: Setting<Boolean> = Setting.boolSetting(
             "index.opendistro.rollup_index",
             false,
             Setting.Property.IndexScope,
             Setting.Property.InternalIndex
+        )
+
+        val ROLLUP_INGEST_BACKOFF_MILLIS: Setting<TimeValue> = Setting.positiveTimeSetting(
+            "opendistro.rollup.ingest.backoff_millis", // todo: finalize all setting names
+            TimeValue.timeValueMillis(50),
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
+        )
+
+        val ROLLUP_INGEST_BACKOFF_COUNT: Setting<Int> = Setting.intSetting(
+            "opendistro.rollup.ingest.backoff_count",
+            2,
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
         )
     }
 }

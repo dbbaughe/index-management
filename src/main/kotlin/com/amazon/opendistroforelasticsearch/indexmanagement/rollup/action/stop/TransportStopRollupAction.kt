@@ -13,32 +13,40 @@
  * permissions and limitations under the License.
  */
 
-package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.delete
+package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.stop
 
+import org.apache.logging.log4j.LogManager
 import org.elasticsearch.action.ActionListener
-import org.elasticsearch.action.delete.DeleteResponse
+import org.elasticsearch.action.DocWriteResponse
 import org.elasticsearch.action.support.ActionFilters
 import org.elasticsearch.action.support.HandledTransportAction
+import org.elasticsearch.action.support.master.AcknowledgedResponse
+import org.elasticsearch.action.update.UpdateResponse
 import org.elasticsearch.client.Client
 import org.elasticsearch.common.inject.Inject
 import org.elasticsearch.tasks.Task
 import org.elasticsearch.transport.TransportService
 
-class TransportDeleteRollupAction @Inject constructor(
+class TransportStopRollupAction @Inject constructor(
     transportService: TransportService,
     val client: Client,
     actionFilters: ActionFilters
-) : HandledTransportAction<DeleteRollupRequest, DeleteResponse>(
-    DeleteRollupAction.NAME, transportService, actionFilters, ::DeleteRollupRequest
+) : HandledTransportAction<StopRollupRequest, AcknowledgedResponse>(
+    StopRollupAction.NAME, transportService, actionFilters, ::StopRollupRequest
 ) {
 
-    override fun doExecute(task: Task, request: DeleteRollupRequest, actionListener: ActionListener<DeleteResponse>) {
-        client.delete(request, object : ActionListener<DeleteResponse> {
-            override fun onResponse(response: DeleteResponse) {
-                actionListener.onResponse(response)
+    private val log = LogManager.getLogger(javaClass)
+
+    override fun doExecute(task: Task, request: StopRollupRequest, actionListener: ActionListener<AcknowledgedResponse>) {
+        log.info("About to execute stop transport update request")
+        client.update(request, object : ActionListener<UpdateResponse> {
+            override fun onResponse(response: UpdateResponse) {
+                log.info("Stop execute update response ${response.result}")
+                actionListener.onResponse(AcknowledgedResponse(response.result == DocWriteResponse.Result.UPDATED))
             }
 
             override fun onFailure(t: Exception) {
+                log.info("Stop execute update failure", t)
                 actionListener.onFailure(t)
             }
         })

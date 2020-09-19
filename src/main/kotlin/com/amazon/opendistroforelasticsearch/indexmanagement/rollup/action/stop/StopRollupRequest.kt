@@ -13,50 +13,42 @@
  * permissions and limitations under the License.
  */
 
-package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.index
+package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.stop
 
-import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.Rollup
+import com.amazon.opendistroforelasticsearch.indexmanagement.IndexManagementPlugin.Companion.INDEX_MANAGEMENT_INDEX
 import org.elasticsearch.action.ActionRequestValidationException
 import org.elasticsearch.action.ValidateActions.addValidationError
-import org.elasticsearch.action.index.IndexRequest
-import org.elasticsearch.action.support.WriteRequest
+import org.elasticsearch.action.update.UpdateRequest
 import org.elasticsearch.common.io.stream.StreamInput
 import org.elasticsearch.common.io.stream.StreamOutput
-import org.elasticsearch.rest.RestRequest
 import java.io.IOException
+import java.time.Instant
 
-class IndexRollupRequest : IndexRequest {
+
+/**
+ * A request to stop a rollup job.
+ */
+class StopRollupRequest : UpdateRequest {
     val rollupID: String
-    val method: RestRequest.Method
-    val rollup: Rollup
 
     @Throws(IOException::class)
     constructor(sin: StreamInput) : super(sin) {
         rollupID = sin.readString()
-        super.setIfSeqNo(sin.readLong())
-        super.setIfPrimaryTerm(sin.readLong())
-        super.setRefreshPolicy(WriteRequest.RefreshPolicy.readFrom(sin))
-        method = sin.readEnum(RestRequest.Method::class.java)
-        rollup = Rollup.readFrom(sin)
     }
 
-    constructor(
-        rollupID: String,
-        seqNo: Long,
-        primaryTerm: Long,
-        refreshPolicy: WriteRequest.RefreshPolicy,
-        method: RestRequest.Method,
-        rollup: Rollup
-    ) {
+    /**
+     * Constructs a new stop rollup request for the specified rollupID.
+     *
+     * @param rollupID The rollupID of job to stop.
+     */
+    constructor(rollupID: String) {
         this.rollupID = rollupID
-        super.setIfSeqNo(seqNo)
-        super.setIfPrimaryTerm(primaryTerm)
-        super.setRefreshPolicy(refreshPolicy)
-        this.method = method
-        this.rollup = rollup
+        val now = Instant.now().toEpochMilli()
+        super.index(INDEX_MANAGEMENT_INDEX)
+            .id(rollupID)
+            .doc(mapOf("rollup" to mapOf("enabled" to false, "enabled_time" to null, "last_updated_time" to now)))
     }
 
-    // TODO
     override fun validate(): ActionRequestValidationException? {
         var validationException: ActionRequestValidationException? = null
         if (rollupID.isBlank()) {
@@ -71,10 +63,5 @@ class IndexRollupRequest : IndexRequest {
     override fun writeTo(out: StreamOutput) {
         super.writeTo(out)
         out.writeString(rollupID)
-        out.writeLong(ifSeqNo())
-        out.writeLong(ifPrimaryTerm())
-        refreshPolicy.writeTo(out)
-        out.writeEnum(method)
-        rollup.writeTo(out)
     }
 }

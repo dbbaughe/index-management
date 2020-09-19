@@ -1,0 +1,25 @@
+# curl 'http://localhost:5601/tnq/api/sample_data/ecommerce'
+#  -X 'POST'
+#  -H 'Connection: keep-alive'
+#  -H 'Content-Length: 0'
+#  -H 'kbn-version: 7.9.1'
+#  -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36'
+#  -H 'Content-Type: application/json'
+#  -H 'Accept: */*'
+#  -H 'Origin: http://localhost:5601'
+#  -H 'Sec-Fetch-Site: same-origin'
+#  -H 'Sec-Fetch-Mode: cors'
+#  -H 'Sec-Fetch-Dest: empty'
+#  -H 'Referer: http://localhost:5601/tnq/app/home'
+#  -H 'Accept-Language: en-US,en;q=0.9,ru;q=0.8'
+#  -H 'Cookie: security_preferences=Fe26.2**541776df2b90bccc537ef61bf07e1090180ca25a49ab84fa861249a85c28502e*wvq4Za1XW-ba6qQl7hrL9w*QoYqmW2rceRyGpgWklwSb6R5yl-xwu94uHMqNYnJOI8**03c56d067f1fd2a175ae7fe4ed258c6f7cb62a647639f43ee6695aefd9004cef*csGKsoqseCIFzeGON0kXYkS34LE62JH_FYz8WXuk7jA; Idea-a2045d17=8ffc035d-3b58-46b5-9f8a-5aaa240a77fa'
+#  --compressed
+POST localhost:5601/tnq/api/sample_data/ecommerce
+Connection: keep-alive
+kbn-version: 7.9.1
+Accept: */*
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36
+Content-Type: application/json
+
+###
+

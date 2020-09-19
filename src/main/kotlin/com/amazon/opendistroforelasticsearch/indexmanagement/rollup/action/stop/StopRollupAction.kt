@@ -13,13 +13,14 @@
  * permissions and limitations under the License.
  */
 
-package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.index
+package com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.stop
 
 import org.elasticsearch.action.ActionType
+import org.elasticsearch.action.support.master.AcknowledgedResponse
 
-class IndexRollupAction private constructor() : ActionType<IndexRollupResponse>(NAME, ::IndexRollupResponse) {
+class StopRollupAction private constructor() : ActionType<AcknowledgedResponse>(NAME, ::AcknowledgedResponse) {
     companion object {
-        val INSTANCE = IndexRollupAction()
-        val NAME = "cluster:admin/indexmanagement/rollup/index"
+        val INSTANCE = StopRollupAction()
+        val NAME = "cluster:admin/indexmanagement/rollup/stop"
     }
 }

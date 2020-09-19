@@ -3,6 +3,7 @@ Content-Type: application/json
 
 {
   "rollup": {
+    "enabled": true,
     "schedule": {
       "interval": {
         "period": 1,
@@ -16,13 +17,13 @@ Content-Type: application/json
     "target_index": "rollup-test-index",
     "page_size": 100,
     "delay": 0,
-    "dimensions": {
+    "dimensions": [{
       "date_histogram": {
           "field": "@timestamp",
           "fixed_interval": "1h",
           "timezone": "1h"
       }
-    }
+    }]
   }
 }
 
@@ -33,3 +34,83 @@ Content-Type: application/json
 ###
 GET localhost:9200/_opendistro/_rollup/jobs/example
 Content-Type: application/json
+
+###
+DELETE localhost:9200/rollup-test-index
+
+###
+GET localhost:9200/rollup-test-index/_mappings
+
+###
+POST localhost:9200/rollup-test-index/_search
+
+###
+POST localhost:9200/rollup-test-index/_doc
+Content-Type: application/json
+
+{
+  "hey": 1,
+  "updated_at": 1600381015
+}
+
+###
+POST localhost:9200/test/_doc
+Content-Type: application/json
+
+{
+  "hey": 5,
+  "updated_at": 1600381015
+}
+
+###
+POST localhost:9200/*/_search
+
+###
+PUT localhost:9200/ok
+
+###
+POST localhost:9200/ok/_doc
+Content-Type: application/json
+
+{
+  "ok": 5
+}
+
+###
+GET localhost:9200/ok,two/_search
+Content-Type: application/json
+
+{
+  "query": {
+    "term": {
+      "some_random_field": {
+        "value": "nothing"
+      }
+    }
+  }
+}
+
+###
+PUT localhost:9200/_opendistro/_rollup/jobs/example/_start
+
+###
+PUT localhost:9200/_opendistro/_rollup/jobs/example/_stop
+
+###
+GET localhost:9200/.opendistro-ism-config/_search?pretty
+
+###
+PUT localhost:9200/ok
+###
+PUT localhost:9200/two-02
+###
+GET localhost:9200/ok,two*,t*,*/_search
+
+
+###
+
+GET localhost:9200/rollup-test-index/_mapping/field/_meta?include_defaults=true
+
+###
+
+GET localhost:9200/rollup-test-index/_mapping
