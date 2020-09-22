@@ -24,34 +24,38 @@ import org.elasticsearch.common.xcontent.XContentParser.Token
 import org.elasticsearch.common.xcontent.XContentParserUtils.ensureExpectedToken
 import java.io.IOException
 
-data class Terms(val field: String): Dimension(Type.TERMS) {
+data class Terms(val termsSourceField: String, val termsTargetField: String): Dimension(Type.TERMS, termsSourceField, termsTargetField) {
 
     @Throws(IOException::class)
     constructor(sin: StreamInput): this(
-        field = sin.readString()
+        termsSourceField = sin.readString(),
+        termsTargetField = sin.readString()
     )
 
     override fun toXContent(builder: XContentBuilder, params: ToXContent.Params): XContentBuilder {
         return builder.startObject()
             .startObject(type.type)
-            .field(TERMS_FIELD_FIELD, field)
+            .field(TERMS_SOURCE_FIELD_FIELD, termsSourceField)
+            .field(TERMS_TARGET_FIELD_FIELD, termsTargetField)
             .endObject()
             .endObject()
     }
 
     override fun writeTo(out: StreamOutput) {
-        out.writeString(field)
+        out.writeString(termsSourceField)
     }
 
     companion object {
         const val TERMS_FIELD = "terms"
-        const val TERMS_FIELD_FIELD = "field"
+        const val TERMS_SOURCE_FIELD_FIELD = "source_field"
+        const val TERMS_TARGET_FIELD_FIELD = "target_field"
 
         @Suppress("ComplexMethod", "LongMethod")
         @JvmStatic
         @Throws(IOException::class)
         fun parse(xcp: XContentParser): Terms {
-            var field: String? = null
+            var termsSourceField: String? = null
+            var termsTargetField: String? = null
 
             ensureExpectedToken(
                 Token.START_OBJECT,
@@ -63,11 +67,16 @@ data class Terms(val field: String): Dimension(Type.TERMS) {
                 xcp.nextToken()
 
                 when (fieldName) {
-                    TERMS_FIELD_FIELD -> field = xcp.text()
+                    TERMS_SOURCE_FIELD_FIELD -> termsSourceField = xcp.text()
+                    TERMS_TARGET_FIELD_FIELD -> termsTargetField = xcp.text()
                     else -> throw IllegalArgumentException("Invalid field: [$fieldName] found in Rollup terms aggregation.")
                 }
             }
-            return Terms(requireNotNull(field) { "Field cannot be null in terms aggregation" })
+            if (termsTargetField == null) termsTargetField = termsSourceField // TODO: testing
+            return Terms(
+                requireNotNull(termsSourceField) { "Source field cannot be null in terms aggregation" },
+                requireNotNull(termsTargetField) { "Target field cannot be null in terms aggregation" }
+            )
         }
 
         @JvmStatic

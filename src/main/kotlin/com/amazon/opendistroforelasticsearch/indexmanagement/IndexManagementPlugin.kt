@@ -33,6 +33,7 @@ import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagemen
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.settings.ManagedIndexSettings
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.RollupActionFilter
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.RollupInterceptor
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.RollupMapperService
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.RollupRunner
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.RollupSearchListener
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.delete.DeleteRollupAction
@@ -217,6 +218,7 @@ internal class IndexManagementPlugin : JobSchedulerExtension, SearchPlugin, Acti
             .registerNamedXContentRegistry(xContentRegistry)
             .registerScriptService(scriptService)
             .registerSettings(settings)
+            .registerRollupMapperService(RollupMapperService(client))
             .registerConsumers()
         rollupSearchListener = RollupSearchListener(clusterService, indexNameExpressionResolver)
         rollupInterceptor = RollupInterceptor()

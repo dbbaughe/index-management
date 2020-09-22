@@ -22,7 +22,8 @@ import org.elasticsearch.common.xcontent.XContentParser.Token
 import org.elasticsearch.common.xcontent.XContentParserUtils.ensureExpectedToken
 import java.io.IOException
 
-abstract class Dimension(val type: Type) : ToXContentObject, Writeable {
+// TODO: field - move it to higher abstraction? can we have a dimension without a field?
+abstract class Dimension(val type: Type, val sourceField: String, val targetField: String) : ToXContentObject, Writeable {
 
     enum class Type(val type: String) {
         DATE_HISTOGRAM("date_histogram"),

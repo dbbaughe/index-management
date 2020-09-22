@@ -30,6 +30,12 @@ import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimens
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimension.Dimension
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimension.Histogram
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.dimension.Terms
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.metric.Average
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.metric.Max
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.metric.Metric
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.metric.Min
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.metric.Sum
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.metric.ValueCount
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.settings.RollupSettings.Companion.ROLLUP_INGEST_BACKOFF_COUNT
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.settings.RollupSettings.Companion.ROLLUP_INGEST_BACKOFF_MILLIS
 import com.amazon.opendistroforelasticsearch.indexmanagement.util._DOC
@@ -62,10 +68,12 @@ import org.elasticsearch.action.search.SearchResponse
 import org.elasticsearch.action.support.master.AcknowledgedResponse
 import org.elasticsearch.client.Client
 import org.elasticsearch.cluster.service.ClusterService
+import org.elasticsearch.common.io.stream.StreamOutput
 import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.common.xcontent.LoggingDeprecationHandler
 import org.elasticsearch.common.xcontent.NamedXContentRegistry
 import org.elasticsearch.common.xcontent.ToXContent
+import org.elasticsearch.common.xcontent.XContentBuilder
 import org.elasticsearch.common.xcontent.XContentFactory
 import org.elasticsearch.common.xcontent.XContentHelper
 import org.elasticsearch.common.xcontent.XContentParser
@@ -83,12 +91,16 @@ import org.elasticsearch.search.aggregations.bucket.composite.HistogramValuesSou
 import org.elasticsearch.search.aggregations.bucket.composite.InternalComposite
 import org.elasticsearch.search.aggregations.bucket.composite.TermsValuesSourceBuilder
 import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramInterval
+import org.elasticsearch.search.aggregations.metrics.AvgAggregationBuilder
 import org.elasticsearch.search.aggregations.metrics.InternalAvg
 import org.elasticsearch.search.aggregations.metrics.InternalMax
 import org.elasticsearch.search.aggregations.metrics.InternalMin
 import org.elasticsearch.search.aggregations.metrics.InternalSum
 import org.elasticsearch.search.aggregations.metrics.InternalValueCount
+import org.elasticsearch.search.aggregations.metrics.MaxAggregationBuilder
+import org.elasticsearch.search.aggregations.metrics.MinAggregationBuilder
 import org.elasticsearch.search.aggregations.metrics.SumAggregationBuilder
+import org.elasticsearch.search.aggregations.metrics.ValueCountAggregationBuilder
 import org.elasticsearch.search.builder.SearchSourceBuilder
 import java.time.ZoneId
 
@@ -102,6 +114,7 @@ object RollupRunner : ScheduledJobRunner,
     private lateinit var xContentRegistry: NamedXContentRegistry
     private lateinit var scriptService: ScriptService
     private lateinit var settings: Settings
+    private lateinit var rollupMapperService: RollupMapperService
     @Volatile private lateinit var retryIngestPolicy: BackoffPolicy
 
     fun registerClusterService(clusterService: ClusterService): RollupRunner {
@@ -126,6 +139,11 @@ object RollupRunner : ScheduledJobRunner,
 
     fun registerSettings(settings: Settings): RollupRunner {
         this.settings = settings
+        return this
+    }
+
+    fun registerRollupMapperService(rollupMapperService: RollupMapperService): RollupRunner {
+        this.rollupMapperService = rollupMapperService
         return this
     }
 
@@ -194,82 +212,6 @@ object RollupRunner : ScheduledJobRunner,
 
         // // // While loop after key Composite aggregations
 
-        // // // bulkIndex
-        // This creates the target index if it doesn't already exist
-        // Should reject if the target index exists and is not a rolled up index
-        try {
-            val request = CreateIndexRequest(job.targetIndex)
-                .settings(Settings.builder().put("index.opendistro.rollup_index", true).build())
-                .mapping(_DOC, IndexManagementIndices.rollupTargetMappings, XContentType.JSON)
-                // TODO: perhaps we can do better than this for mappings...
-                //  can we read in the actual mappings from the source index and use that?
-                //  it'll have issues with metrics though, i.e. an int mapping with 3, 5, 6 added up and divided by 3 for avg is 14/3 = 4.6666
-                //  what happens if the first indexing is an integer, i.e. 3 + 3 + 3 = 9/3 = 3 and it saves it as int
-                //  and then the next is float and it fails or rounds it up?
-            // what could be nice is if I do the optimization of mappings for all the dimensions and then I dont have to
-            // rely on the *.date_histogram.* dynamic mapping and could directly
-            // use the dimension field names as they were which means I dont even have to transform
-            // any terms, date histograms, or histograms
-            val response: CreateIndexResponse = client.admin().indices().suspendUntil { create(request, it) }
-
-            logger.info("Response ${response.isAcknowledged}")
-
-            // Test should not be able to put rollup metadata in non rollup index
-            withContext(Dispatchers.IO) {
-                // TODO: Clean up
-                //{ meta: { rollup: { <id>: <job> } } }
-//                val xcp = XContentType.JSON.xContent().createParser(NamedXContentRegistry.EMPTY, LoggingDeprecationHandler.INSTANCE, IndexManagementIndices.rollupTargetMappings)
-//                ensureExpectedToken(XContentParser.Token.START_OBJECT, xcp.nextToken(), xcp::getTokenLocation) // start of mappings block
-//                while (xcp.nextToken() != XContentParser.Token.END_OBJECT) {
-//                    val fieldName = xcp.currentName()
-//                    xcp.nextToken()
-//
-//                    when (fieldName) {
-//                        "_meta" -> {
-//                            logger.info("Field name is meta")
-//                            ensureExpectedToken(XContentParser.Token.START_OBJECT, xcp.nextToken(), xcp::getTokenLocation) // start of mappings block
-//                            while (xcp.nextToken() != XContentParser.Token.END_OBJECT) {
-//                                val innerFieldName = xcp.currentName()
-//                                xcp.nextToken()
-//
-//                                when (innerFieldName) {
-//                                    "rollups" -> {
-//                                        logger.info("Inner field name is rollups")
-//                                    }
-//                                }
-//                            }
-//                        }
-//                    }
-//                }
-
-
-//                XContentFactory.jsonBuilder().startObject()
-//                    .startObject("_meta")
-//                    .startObject("rollups")
-//                    .field(job.id, job, XCONTENT_WITHOUT_TYPE)
-//                    .endObject().endObject().endObject()
-                val builder = XContentFactory.jsonBuilder().startObject()
-                    .startObject("_meta")
-                    .startObject("rollups")
-                    .field(job.id, job, XCONTENT_WITHOUT_TYPE)
-                    .endObject()
-                    .endObject()
-                    .endObject()
-                val putMappingRequest = PutMappingRequest(job.targetIndex).type(_DOC)
-                    .source(builder)
-
-                // put mappings needs to ensure we dont overwrite an exisitng rollup job meta
-                // probably can just get current mappings and parse all the existing job ids - if this job id already exists then ignore
-                // should we let a person delete a job from the meta mappings of an index? they would have to make sure they deleted the data too
-                val putResponse: AcknowledgedResponse = client.admin().indices().suspendUntil { putMapping(putMappingRequest, it) }
-                logger.info("PutResponse: ${putResponse.isAcknowledged}")
-            }
-        } catch (e: ResourceAlreadyExistsException) {
-            logger.info("Index exists already")
-        } catch (e: Exception) {
-            logger.error(e)
-        }
-
         // now have a response and we need to convert it into bulk requests into target index
         // if thats successfull then we proceed with next afterkey
 //        val response: SearchResponse = client.suspendUntil { search(rollupSearchRequest, it) }
@@ -281,6 +223,7 @@ object RollupRunner : ScheduledJobRunner,
 //        response.totalShards // stats?
 
 
+        rollupMapperService.createRollupTargetIndex(job)
         // TODO: clean up in terms of after key and search request
         val cab = getCompositeAggregationBuilder(job)
         var afterKey: Map<String, Any>? = null
@@ -444,6 +387,12 @@ object RollupRunner : ScheduledJobRunner,
 
     //TODO missing terms field           "geoip.city_name.terms.value" : null,
 
+    // TODO: how to handle average of averages
+
+    // TODO: doc counts for aggregations are showing the doc counts of the rollup docs and not the raw data which is expected, elastic has a PR for a _doc_count mapping which we might be able to use but its in PR and they could change it
+    //  is there a way we can overwrite doc_count? on request/response? https://github.com/elastic/elasticsearch/pull/58339
+    //  verified elastic currently gives incorrect doc counts too (they give rolled up doc counts)
+
     private fun convertResponseToRequests(job: Rollup, internalComposite: InternalComposite): List<DocWriteRequest<*>> {
         val requests = mutableListOf<DocWriteRequest<*>>()
         internalComposite.buckets.forEach {
@@ -458,6 +407,11 @@ object RollupRunner : ScheduledJobRunner,
             logger.info("documentId: $documentId")
             it.key.entries.forEach {
                 logger.info("Keys - key: ${it.key} and value: ${it.value}")
+                // TODO: it seems composite returns just key values? what happens when your composuite grouping is on same field?
+                //  it seems coposite requires the user to enter a key to represent the source which puts the requirement of dealing with conflicts
+                //  on the user which is nice - we could do the same in rollup dimensions? require user to enter a string and then not have to deal with
+                //  any conflicting fields with different types?
+                val type = (job.dimensions.find { dim -> dim.targetField == it.key } as Dimension).type.type // TODO: fix this
                 mapOfKeyValues[it.key] = it.value // this doesnt work because you can have multiple types of dimensions on same field, i.e. terms and histogram on number field
                 // transform doesnt allow terms on number but rollup does
             }
@@ -468,7 +422,7 @@ object RollupRunner : ScheduledJobRunner,
                     is InternalSum -> {
                         logger.info("Sub Aggregation is InternalSum")
                         logger.info("Type is ${it.type} and name is ${it.name} and value is ${it.value}")
-                        mapOfKeyValues["${it.name}.${it.type}"] = it.value
+                        mapOfKeyValues["${it.name}.${it.type}"] = it.value // TODO: <name>.sum = value change to <name>: { sum: value }
                         // it.name + it.type = it.value          -> taxless_total_price.sum = 35.96875
                         // does this need doc count? or can we just use doc count from above
                         // This should be saved with the above key... or do we need to? since the above key is only 1 per document
@@ -481,6 +435,7 @@ object RollupRunner : ScheduledJobRunner,
                     else -> logger.info("Unsupported aggregation")
                 }
             }
+            logger.info("mapOfKeyValues: $mapOfKeyValues")
             val indexRequest = IndexRequest(job.targetIndex) // do we want to allow users to add routing to the documents?
                 .id(documentId)
                 .source(mapOfKeyValues) // we shouldnt need to care about version/seqno/primaryterm because this hsould be idempotent
@@ -505,8 +460,10 @@ object RollupRunner : ScheduledJobRunner,
         job.dimensions.forEach { dimension ->
             when (dimension) {
                 is DateHistogram -> {
-                    DateHistogramValuesSourceBuilder(dimension.field).apply {
-                        this.field(dimension.field)
+                    // TODO: this could conflict with other fields - require user to give name instead?
+                    // but this goes against rollup which has the same field/names
+                    DateHistogramValuesSourceBuilder(dimension.targetField).apply {
+                        this.field(dimension.sourceField)
                         this.timeZone(ZoneId.of(dimension.timezone))
                         dimension.calendarInterval?.let { it ->
                             this.calendarInterval(DateHistogramInterval(it))
@@ -519,16 +476,17 @@ object RollupRunner : ScheduledJobRunner,
                     }
                 }
                 is Terms -> {
-                    TermsValuesSourceBuilder(dimension.field).apply {
-                        this.field(dimension.field)
+                    // TODO: require unique target fields on metrics and dimensions? is it needed on metrics or only dimensions?
+                    TermsValuesSourceBuilder(dimension.targetField).apply {
+                        this.field(dimension.sourceField)
                     }.also {
                         sources.add(it)
                     }
                 }
                 is Histogram -> {
                     // TODO is it possible any of these can be done mixed on the same field resulting in conflicts with the keys/names?
-                    HistogramValuesSourceBuilder(dimension.field).apply {
-                        this.field(dimension.field)
+                    HistogramValuesSourceBuilder(dimension.targetField).apply {
+                        this.field(dimension.sourceField)
                         this.interval(dimension.interval)
                     }
                 }
@@ -536,23 +494,26 @@ object RollupRunner : ScheduledJobRunner,
         }
         val cab = CompositeAggregationBuilder("RollupCompositeAggs", sources)
         job.metrics.forEach { metric ->
-            metric.field
+            metric.sourceField
             metric.metrics // right now strings, needs to be "AVG" -> { "avg": { } }
             metric.metrics.forEach { agg ->
                 // TODO is it possible any of these can be done mixed on the same field resulting in conflicts with the keys/names?
-                when (agg) {
-                    "avg" -> logger.info("Found agg $agg")
-                    "sum" -> {
-                        cab.subAggregation(SumAggregationBuilder(metric.field).field(metric.field))
+                cab.subAggregation(
+                    when (agg) {
+                        is Average -> AvgAggregationBuilder(metric.targetField).field(metric.sourceField)
+                        is Sum -> SumAggregationBuilder(metric.targetField).field(metric.sourceField)
+                        is Max -> MaxAggregationBuilder(metric.targetField).field(metric.sourceField)
+                        is Min-> MinAggregationBuilder(metric.targetField).field(metric.sourceField)
+                        is ValueCount -> ValueCountAggregationBuilder(metric.targetField).field(metric.sourceField)
+                        else -> throw UnsupportedOperationException("Found unsupported metric aggregation ${agg.type.type}")
                     }
-                    "max" -> logger.info("Found agg $agg")
-                    "min" -> logger.info("Found agg $agg")
-                    "value_count" -> logger.info("Found agg $agg")
-                    else -> logger.error("Found unknown agg $agg")
-                }
+                )
             }
         }
         return cab
+        // TODO: unrelated to this part but for debugging ill want to see raw rollup documents but all my searches will get intercepted and transformed?
+        //  only if we reject size > 0... should we? makes sense for user experience but for debugging its a pain
+        //  can still have cluster setting to disable search but that means you could impact ongoing searches by cx to debug
     }
 
     private fun getRollupSearchRequest(cab: CompositeAggregationBuilder, index: String): SearchRequest {

@@ -509,7 +509,10 @@
           "properties": {
             "date_histogram": {
               "properties": {
-                "field": {
+                "source_field": {
+                  "type": "keyword"
+                },
+                "target_field": {
                   "type": "keyword"
                 },
                 "fixed_interval": {
@@ -525,14 +528,20 @@
             },
             "terms": {
               "properties": {
-                "field": {
+                "source_field": {
+                  "type": "keyword"
+                },
+                "target_field": {
                   "type": "keyword"
                 }
               }
             },
             "histogram": {
               "properties": {
-                "field": {
+                "source_field": {
+                  "type": "keyword"
+                },
+                "target_field": {
                   "type": "keyword"
                 },
                 "interval": {
@@ -545,11 +554,31 @@
         "metrics": {
           "type": "nested",
           "properties": {
-            "field": {
+            "source_field": {
+              "type": "keyword"
+            },
+            "target_field": {
               "type": "keyword"
             },
             "metrics": {
-              "type": "keyword"
+              "type": "nested",
+              "properties": {
+                "avg": {
+                  "type": "object"
+                },
+                "max": {
+                  "type": "object"
+                },
+                "min": {
+                  "type": "object"
+                },
+                "sum": {
+                  "type": "object"
+                },
+                "value_count": {
+                  "type": "object"
+                }
+              }
             }
           }
         }

@@ -24,38 +24,47 @@ import org.elasticsearch.common.xcontent.XContentParser.Token
 import org.elasticsearch.common.xcontent.XContentParserUtils.ensureExpectedToken
 import java.io.IOException
 
-data class Histogram(val field: String, val interval: Double): Dimension(Type.HISTOGRAM) {
+data class Histogram(
+    val histogramSourceField: String,
+    val histogramTargetField: String,
+    val interval: Double
+): Dimension(Type.HISTOGRAM, histogramSourceField, histogramTargetField) {
 
     @Throws(IOException::class)
     constructor(sin: StreamInput): this(
-        field = sin.readString(),
+        histogramSourceField = sin.readString(),
+        histogramTargetField = sin.readString(),
         interval = sin.readDouble()
     )
 
     override fun toXContent(builder: XContentBuilder, params: ToXContent.Params): XContentBuilder {
         return builder.startObject()
             .startObject(type.type)
-            .field(HISTOGRAM_FIELD_FIELD, field)
+            .field(HISTOGRAM_SOURCE_FIELD_FIELD, histogramSourceField)
+            .field(HISTOGRAM_TARGET_FIELD_FIELD, histogramTargetField)
             .field(HISTOGRAM_INTERVAL_FIELD, interval)
             .endObject()
             .endObject()
     }
 
     override fun writeTo(out: StreamOutput) {
-        out.writeString(field)
+        out.writeString(histogramSourceField)
+        out.writeString(histogramTargetField)
         out.writeDouble(interval)
     }
 
     companion object {
         const val HISTOGRAM_FIELD = "histogram"
-        const val HISTOGRAM_FIELD_FIELD = "field"
+        const val HISTOGRAM_SOURCE_FIELD_FIELD = "source_field"
+        const val HISTOGRAM_TARGET_FIELD_FIELD = "target_field"
         const val HISTOGRAM_INTERVAL_FIELD = "interval"
 
         @Suppress("ComplexMethod", "LongMethod")
         @JvmStatic
         @Throws(IOException::class)
         fun parse(xcp: XContentParser): Histogram {
-            var field: String? = null
+            var histogramSourceField: String? = null
+            var histogramTargetField: String? = null
             var interval: Double? = null
 
             ensureExpectedToken(Token.START_OBJECT, xcp.currentToken(), xcp::getTokenLocation)
@@ -64,13 +73,15 @@ data class Histogram(val field: String, val interval: Double): Dimension(Type.HI
                 xcp.nextToken()
 
                 when (fieldName) {
-                    HISTOGRAM_FIELD_FIELD -> field = xcp.text()
+                    HISTOGRAM_SOURCE_FIELD_FIELD -> histogramSourceField = xcp.text()
+                    HISTOGRAM_TARGET_FIELD_FIELD -> histogramTargetField = xcp.text()
                     HISTOGRAM_INTERVAL_FIELD -> interval = xcp.doubleValue()
                 }
             }
-
+            if (histogramTargetField == null) histogramTargetField = histogramSourceField
             return Histogram(
-                requireNotNull(field) { "Field must be set in histogram" },
+                requireNotNull(histogramSourceField) { "Source field must be set in histogram" },
+                requireNotNull(histogramTargetField) { "Target field must be set in histogram" },
                 requireNotNull(interval) { "Interval must be set in histogram" }
             )
         }

@@ -20,26 +20,54 @@ Content-Type: application/json
     "dimensions": [
       {
         "date_histogram": {
-          "field": "order_date",
+          "source_field": "order_date",
           "fixed_interval": "1h",
           "timezone": "America/Los_Angeles"
         }
       },
       {
         "terms": {
-          "field": "geoip.city_name"
+          "source_field": "geoip.city_name"
         }
       }
     ],
     "metrics": [
       {
-        "field": "taxless_total_price",
-        "metrics": ["sum"]
+        "source_field": "taxless_total_price",
+        "metrics": [{ "sum":  {} }]
       }
     ]
   }
 }
 
+###
+POST localhost:9200/rollup-test-index/_search
+###
+GET localhost:9200/_cat/indices
+
+###
+POST localhost:9200/kibana_sample_data_ecommerce/_search
+Content-Type: application/json
+
+{
+  "size": 0,
+  "aggs": {
+    "city": {
+      "terms": {
+        "field": "geoip.city_name",
+        "size": 5,
+        "order": {"total_sales": "desc"}
+      },
+      "aggs": {
+        "total_sales": {
+          "sum": {
+            "field": "taxless_total_price"
+          }
+        }
+      }
+    }
+  }
+}
 
 ###
 POST localhost:9200/rollup-test-index/_search
@@ -62,5 +90,42 @@ Content-Type: application/json
         }
       }
     }
+  }
+}
+###
+DELETE localhost:9200/rollup-test-index
+###
+PUT localhost:9200/rollup-test-index
+Content-Type: application/json
+
+{
+  "mappings": {
+    "_meta" : {
+      "schema_version": 1,
+      "rollups": {
+        "something": {}
+      }
+    },
+    "dynamic_templates" : [
+      {
+        "strings" : {
+          "match_mapping_type" : "string",
+          "mapping" : {
+            "type" : "keyword"
+          }
+        }
+      },
+      {
+        "date_histograms" : {
+          "path_match" : "*.date_histogram.*",
+          "mapping" : {
+            "type" : "date"
+          }
+        }
+      }
+    ]
+  },
+  "settings": {
+    "index.opendistro.rollup_index": true
   }
 }

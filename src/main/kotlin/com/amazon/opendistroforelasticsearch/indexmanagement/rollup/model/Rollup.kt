@@ -59,7 +59,10 @@ data class Rollup(
     val dimensions: List<Dimension>,
     val metrics: List<RollupMetrics>
 ) : ScheduledJobParameter, Writeable {
-
+    // TODO: specifically for ROllups dont allow user to change the target_field on dimensions or metrics
+    //   because it just doesnt make any sense, if a user has a price field and renames it to some_random_name and then does a query for price
+    //   its weird behavior for it to match price and some_random_field, essentially some_random_field is pointless because the cx has no control over
+    //   the internal data and doesnt actually query it
     init {
         if (enabled) {
             requireNotNull(jobEnabledTime) { "jobEnabledTime must be present if the job is enabled" }
@@ -101,15 +104,16 @@ data class Rollup(
             val dimensionsList = mutableListOf<Dimension>()
             val size = it.readVInt()
             for (i in 0..size) {
-                val type = it.readString()
-                when (type) {
-                    Dimension.Type.DATE_HISTOGRAM.type -> DateHistogram(sin)
-                    Dimension.Type.TERMS.type -> Terms(sin)
-                    Dimension.Type.HISTOGRAM.type -> Histogram(sin)
-                    else -> throw IllegalArgumentException("Invalid dimension type [$type] found in rollup stream input")
-                }
+                val type = it.readEnum(Dimension.Type::class.java)
+                dimensionsList.add(
+                    when (requireNotNull(type) { "Dimension type cannot be null" }) {
+                        Dimension.Type.DATE_HISTOGRAM -> DateHistogram(sin)
+                        Dimension.Type.TERMS -> Terms(sin)
+                        Dimension.Type.HISTOGRAM -> Histogram(sin)
+                    }
+                )
             }
-            dimensionsList
+            dimensionsList.toList()
         },
         metrics = sin.readList(::RollupMetrics)
     )
@@ -158,7 +162,7 @@ data class Rollup(
         out.writeLong(delay)
         out.writeVInt(dimensions.size)
         for (dimension in dimensions) {
-            out.writeString(dimension.type.type)
+            out.writeEnum(dimension.type)
             when (dimension) {
                 is DateHistogram -> dimension.writeTo(out)
                 is Terms -> dimension.writeTo(out)

@@ -25,11 +25,12 @@ import org.elasticsearch.common.xcontent.XContentParserUtils.ensureExpectedToken
 import java.io.IOException
 
 data class DateHistogram(
-    val field: String,
+    val dateHistogramSourceField: String, // TODO: dont like having to rename these just because of field on dimension
+    val dateHistogramTargetField: String, // TODO: dont like having to rename these just because of field on dimension
     val fixedInterval: String?,
     val calendarInterval: String?,
     val timezone: String // TODO: FIX
-): Dimension(Type.DATE_HISTOGRAM) {
+): Dimension(Type.DATE_HISTOGRAM, dateHistogramSourceField, dateHistogramTargetField) {
 
     init {
         require(fixedInterval != null || calendarInterval != null) { "Must specify a fixed or calendar interval" }
@@ -38,7 +39,8 @@ data class DateHistogram(
 
     @Throws(IOException::class)
     constructor(sin: StreamInput): this(
-        field = sin.readString(),
+        dateHistogramSourceField = sin.readString(),
+        dateHistogramTargetField = sin.readString(),
         fixedInterval = sin.readOptionalString(),
         calendarInterval = sin.readOptionalString(),
         timezone = sin.readString()
@@ -49,14 +51,16 @@ data class DateHistogram(
             .startObject(type.type)
         if (fixedInterval != null) builder.field(FIXED_INTERVAL_FIELD, fixedInterval)
         if (calendarInterval != null) builder.field(CALENDAR_INTERVAL_FIELD, calendarInterval)
-        return builder.field(DATE_HISTOGRAM_FIELD_FIELD, field)
+        return builder.field(DATE_HISTOGRAM_SOURCE_FIELD_FIELD, dateHistogramSourceField)
+            .field(DATE_HISTOGRAM_TARGET_FIELD_FIELD, dateHistogramTargetField)
             .field(DATE_HISTOGRAM_TIMEZONE_FIELD, timezone)
             .endObject()
             .endObject()
     }
 
     override fun writeTo(out: StreamOutput) {
-        out.writeString(field)
+        out.writeString(dateHistogramSourceField)
+        out.writeString(dateHistogramTargetField)
         out.writeOptionalString(fixedInterval)
         out.writeOptionalString(calendarInterval)
         out.writeString(timezone)
@@ -66,14 +70,16 @@ data class DateHistogram(
         const val DATE_HISTOGRAM_FIELD = "date_histogram" // TODO: there is prob an official one we can use?
         const val FIXED_INTERVAL_FIELD = "fixed_interval"
         const val CALENDAR_INTERVAL_FIELD = "calendar_interval"
-        const val DATE_HISTOGRAM_FIELD_FIELD = "field"
+        const val DATE_HISTOGRAM_SOURCE_FIELD_FIELD = "source_field"
+        const val DATE_HISTOGRAM_TARGET_FIELD_FIELD = "target_field"
         const val DATE_HISTOGRAM_TIMEZONE_FIELD = "timezone"
 
         @Suppress("ComplexMethod", "LongMethod")
         @JvmStatic
         @Throws(IOException::class)
         fun parse(xcp: XContentParser): DateHistogram {
-            var field: String? = null
+            var dateHistogramSourceField: String? = null
+            var dateHistogramTargetField: String? = null
             var fixedInterval: String? = null
             var calendarInterval: String? = null
             var timezone = "UTC"
@@ -87,12 +93,15 @@ data class DateHistogram(
                     FIXED_INTERVAL_FIELD -> fixedInterval = xcp.text()
                     CALENDAR_INTERVAL_FIELD -> calendarInterval = xcp.text()
                     DATE_HISTOGRAM_TIMEZONE_FIELD -> timezone = xcp.text()
-                    DATE_HISTOGRAM_FIELD_FIELD -> field = xcp.text()
+                    DATE_HISTOGRAM_SOURCE_FIELD_FIELD -> dateHistogramSourceField = xcp.text()
+                    DATE_HISTOGRAM_TARGET_FIELD_FIELD -> dateHistogramTargetField = xcp.text()
                     else -> throw IllegalArgumentException("Invalid field: [$fieldName] found in Rollup terms aggregation.")
                 }
             }
+            if (dateHistogramTargetField == null) dateHistogramTargetField = dateHistogramSourceField
             return DateHistogram(
-                field = requireNotNull(field) { "Field must not be null in date histogram" },
+                dateHistogramSourceField = requireNotNull(dateHistogramSourceField) { "Source field must not be null in date histogram" },
+                dateHistogramTargetField = requireNotNull(dateHistogramTargetField) { "Target field must not be null in date histogram" },
                 fixedInterval = fixedInterval,
                 calendarInterval = calendarInterval,
                 timezone = timezone
