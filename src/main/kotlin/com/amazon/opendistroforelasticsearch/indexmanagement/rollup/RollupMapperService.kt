@@ -16,8 +16,13 @@
 package com.amazon.opendistroforelasticsearch.indexmanagement.rollup
 
 import com.amazon.opendistroforelasticsearch.indexmanagement.IndexManagementIndices
+import com.amazon.opendistroforelasticsearch.indexmanagement.elasticapi.convertToMap
+import com.amazon.opendistroforelasticsearch.indexmanagement.elasticapi.string
 import com.amazon.opendistroforelasticsearch.indexmanagement.elasticapi.suspendUntil
+import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.ManagedIndexRunner
 import com.amazon.opendistroforelasticsearch.indexmanagement.indexstatemanagement.util.XCONTENT_WITHOUT_TYPE
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.mapping.UpdateRollupMappingAction
+import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.action.mapping.UpdateRollupMappingRequest
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.model.Rollup
 import com.amazon.opendistroforelasticsearch.indexmanagement.rollup.settings.RollupSettings
 import com.amazon.opendistroforelasticsearch.indexmanagement.util.IndexUtils.Companion._META
@@ -35,10 +40,16 @@ import org.elasticsearch.action.support.master.AcknowledgedResponse
 import org.elasticsearch.client.Client
 import org.elasticsearch.cluster.metadata.MappingMetadata
 import org.elasticsearch.cluster.service.ClusterService
+import org.elasticsearch.common.io.stream.BytesStreamOutput
+import org.elasticsearch.common.io.stream.StreamInput
 import org.elasticsearch.common.settings.Settings
+import org.elasticsearch.common.xcontent.LoggingDeprecationHandler
+import org.elasticsearch.common.xcontent.ToXContent
 import org.elasticsearch.common.xcontent.XContentBuilder
 import org.elasticsearch.common.xcontent.XContentFactory
+import org.elasticsearch.common.xcontent.XContentHelper
 import org.elasticsearch.common.xcontent.XContentType
+import org.elasticsearch.common.xcontent.json.JsonXContentGenerator
 import org.elasticsearch.transport.RemoteTransportException
 import java.io.IOException
 
@@ -50,9 +61,12 @@ class RollupMapperService(val client: Client, val clusterService: ClusterService
     private val logger = LogManager.getLogger(javaClass)
 
     suspend fun init(rollup: Rollup): Boolean {
+        logger.info("MAPPER INIT ${rollup.targetIndex}")
         if (indexExists(rollup.targetIndex)) {
+            logger.info("MAPPER INIT INDEX EXISTS")
             return initExistingRollupIndex(rollup)
         } else {
+            logger.info("MAPPER INIT CREATE")
             createRollupTargetIndex(rollup)
         }
         return true
@@ -63,6 +77,7 @@ class RollupMapperService(val client: Client, val clusterService: ClusterService
     @Suppress("ReturnCount")
     private suspend fun initExistingRollupIndex(rollup: Rollup): Boolean {
         if (isRollupIndex(rollup.targetIndex)) {
+            logger.info("MAPPER TARGET EXISTS")
             // TODO: Should this only be by ID? What happens if a user wants to delete a job and reuse?
             if (jobExistsInRollupIndex(rollup)) {
                 return true
@@ -85,6 +100,14 @@ class RollupMapperService(val client: Client, val clusterService: ClusterService
     suspend fun createRollupTargetIndex(job: Rollup): Boolean {
         if (indexExists(job.targetIndex)) return isRollupIndex(job.targetIndex)
         try {
+//            val str = job.toXContent(XContentFactory.jsonBuilder(), XCONTENT_WITHOUT_TYPE).string()
+//            val targetMappings = IndexManagementIndices.rollupTargetMappings.let {
+//                val idx = it.indexOf("\"schema_version\"")
+//                logger.info("idx is $idx")
+//                StringBuilder(it).insert(idx, "\"${job.id}\":$str,")
+//            }
+//            logger.info("the strng is $str")
+//            logger.info("the targetMappings $targetMappings")
             val request = CreateIndexRequest(job.targetIndex)
                 .settings(Settings.builder().put(RollupSettings.ROLLUP_INDEX.key, true).build())
                 .mapping(_DOC, IndexManagementIndices.rollupTargetMappings, XContentType.JSON)
@@ -117,21 +140,34 @@ class RollupMapperService(val client: Client, val clusterService: ClusterService
     // TODO: PUT mappings seems to overwrite all _meta data? which means we need to get and then append and then put
     @Suppress("BlockingMethodInNonBlockingContext")
     private suspend fun updateRollupIndexMappings(rollup: Rollup): Boolean {
-        return withContext(Dispatchers.IO) {
-            val putMappingRequest = PutMappingRequest(rollup.targetIndex).type(_DOC).source(partialRollupMappingBuilder(rollup))
-            // probably can just get current mappings and parse all the existing job ids - if this job id already exists then ignore
-            // should we let a person delete a job from the meta mappings of an index? they would have to make sure they deleted the data too
-            val putResponse: AcknowledgedResponse = client.admin().indices().suspendUntil { putMapping(putMappingRequest, it) }
-            putResponse.isAcknowledged
-        }
+        val resp: AcknowledgedResponse = client.suspendUntil { execute(UpdateRollupMappingAction.INSTANCE, UpdateRollupMappingRequest(rollup), it) }
+        //return true
+        logger.info("resp is ${resp.isAcknowledged}")
+        val req = GetMappingsRequest().indices(rollup.targetIndex)
+        val res: GetMappingsResponse = client.admin().indices().suspendUntil { getMappings(req, it) }
+        logger.info("resp2 is ${res.mappings}")
+
+        return true
+
+
+//        return withContext(Dispatchers.IO) {
+            //val putMappingRequest = PutMappingRequest(rollup.targetIndex).type(_DOC).source(partialRollupMappingBuilder(rollup))
+//            // probably can just get current mappings and parse all the existing job ids - if this job id already exists then ignore
+//            // should we let a person delete a job from the meta mappings of an index? they would have to make sure they deleted the data too
+//            val putResponse: AcknowledgedResponse = client.admin().indices().suspendUntil { putMapping(putMappingRequest, it) }
+//            putResponse.isAcknowledged
+//        }
     }
 
     // TODO: error handling
     // TODO: nulls, ie index response is null
     // TODO: no job exists vs has job and wrong metadata id vs has job and right metadata id
     private suspend fun jobExistsInRollupIndex(rollup: Rollup): Boolean {
+        val resp: AcknowledgedResponse = client.suspendUntil { execute(UpdateRollupMappingAction.INSTANCE, UpdateRollupMappingRequest(rollup), it) }
+        logger.info("resp is ${resp.isAcknowledged}")
         val req = GetMappingsRequest().indices(rollup.targetIndex)
         val res: GetMappingsResponse = client.admin().indices().suspendUntil { getMappings(req, it) }
+        logger.info("resp2 is ${res.mappings}")
 
         val indexMapping: MappingMetadata = res.mappings[rollup.targetIndex][_DOC]
 
